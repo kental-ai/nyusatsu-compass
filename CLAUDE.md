@@ -1,4 +1,4 @@
-# 入札コンパス（nyusatsu-compass.jp）
+# 入札コンパス（nyusatsu-compass.com）
 
 官公庁入札の「判断支援」サービス。落札DB×SEOサイト×適格性マッチ通知。
 事業計画・設計・市場分析は ../new-biz/docs/ を正とする（business-plan.md / site-design.md / analysis/）。
