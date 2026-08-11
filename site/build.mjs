@@ -266,6 +266,9 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 
 // robots / llms / sitemap（1万URLごとに分割）
 writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+// Search Console所有権確認 + IndexNowキー（公開仕様）
+writeFileSync(join(DIST, 'googlea7352c9a5da5cbc1.html'), 'google-site-verification: googlea7352c9a5da5cbc1.html');
+writeFileSync(join(DIST, '68c8ff01b5ee8614e56c3a91ccbb8f59.txt'), '68c8ff01b5ee8614e56c3a91ccbb8f59');
 writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}
 官公庁入札の落札相場・落札実績データベース。調達ポータルの落札実績オープンデータ（2013年度〜、${AWARDS.length.toLocaleString()}件）を構造化し、
 業務別相場（/price/）、企業別落札実績（/company/）、機関別落札結果（/organ/）として公開している。
