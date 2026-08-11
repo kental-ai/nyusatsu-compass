@@ -1,7 +1,11 @@
-# ビルドはGitHub Actionsで実行し、dist成果物のみをNetlifyへデプロイする方針。
-# Netlify側のビルドは無効化（コマンドなし・publishのみ）。
+# Netlify上でデータ取得→分類→静的生成まで実行する（hojokin-dbと同方式）。
+# 日次の再ビルドは GitHub Actions (.github/workflows/daily.yml) がBuild hookを叩く。
 [build]
+  command = "node pipeline/fetch_geps.mjs all && node pipeline/classify_rules.mjs && node site/build.mjs"
   publish = "site/dist"
+
+[build.environment]
+  NODE_VERSION = "24"
 
 [functions]
   directory = "netlify/functions"

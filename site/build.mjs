@@ -202,13 +202,34 @@ urls.push(page('/organ/', {
     .map(([c, l]) => `<li><a href="/organ/${c.toLowerCase()}/">${MINISTRIES[c]}</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ul>`,
 }));
 
-// アラートLP（仮・Forms中継は公開時に接続）
+// アラートLP（POSTはNetlify Functionで中継。hidden formはNetlify Formsの検出用）
+const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
 urls.push(page('/alert/', {
   title: `無料の入札新着アラート | ${SITE}`,
   desc: '業種と地域を登録するだけで、官公庁・自治体の新着入札案件を毎朝メールでお知らせします。無料。',
   body: `<h1>入札の新着案件を、毎朝メールで</h1>
 <p>業種と地域を登録すると、条件に合う新着の入札案件を毎朝お届けします。登録は無料です。</p>
-<p class="meta">（公開準備中: フォームは近日設置します）</p>`,
+<form name="alert" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
+<input type="hidden" name="form-name" value="alert">
+<p style="display:none"><label>入力しないでください: <input name="bot-field"></label></p>
+<p><label>メールアドレス<br><input type="email" name="email" required style="width:100%;max-width:400px;padding:8px"></label></p>
+<p><label>業種（主な入札分野）<br><select name="category" required style="padding:8px">
+<option value="">選択してください</option>
+${TAXONOMY.map((t) => `<option>${t.label}</option>`).join('')}
+<option>その他</option></select></label></p>
+<p><label>対象の都道府県<br><select name="pref" required style="padding:8px">
+<option value="">選択してください</option><option>全国</option>
+${PREFS.map((p) => `<option>${p}</option>`).join('')}</select></label></p>
+<p><button type="submit" style="background:#0f6ab2;color:#fff;border:0;padding:12px 32px;border-radius:6px;font-weight:700;font-size:1rem">無料で登録する</button></p>
+</form>
+<p class="meta">登録いただいたメールアドレスは案件通知以外に使用しません。配信はいつでも停止できます。</p>`,
+}));
+urls.push(page('/alert/thanks/', {
+  title: `登録ありがとうございます | ${SITE}`,
+  desc: '入札新着アラートの登録を受け付けました。',
+  noindex: true,
+  body: `<h1>登録を受け付けました</h1>
+<p>配信の準備ができ次第、毎朝の新着案件メールをお届けします。それまでの間は<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
 }));
 
 // about / policy

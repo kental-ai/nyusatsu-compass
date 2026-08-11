@@ -1,0 +1,17 @@
+# 毎朝の再ビルドトリガー。実ビルドはNetlify側（netlify.toml参照）。
+# 事前準備: NetlifyのBuild hooks URLをリポジトリsecretsに NETLIFY_BUILD_HOOK として登録する。
+name: daily-rebuild
+on:
+  schedule:
+    - cron: '0 21 * * *'   # 21:00 UTC = 6:00 JST
+  workflow_dispatch:
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Netlify build
+        run: |
+          if [ -z "${{ secrets.NETLIFY_BUILD_HOOK }}" ]; then
+            echo "NETLIFY_BUILD_HOOK 未設定のためスキップ"; exit 0
+          fi
+          curl -s -X POST "${{ secrets.NETLIFY_BUILD_HOOK }}"
