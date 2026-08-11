@@ -7,6 +7,7 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openDb, DATA_DIR } from './db.mjs';
 import { unzipSingle } from './zip.mjs';
+import { seedOrgans } from './codes.mjs';
 
 const BASE = 'https://api.p-portal.go.jp/pps-web-biz/UAB03/OAB0301?fileversion=v001&filename=';
 const RAW_DIR = join(DATA_DIR, 'raw', 'geps');
@@ -34,17 +35,18 @@ async function download(filename) {
 
 function importRows(db, rows, fiscalYear, source) {
   const now = new Date().toISOString();
+  // 列順は仕様書2.2: 案件番号/案件名称/落札決定日/落札価格/府省コード/入札方式コード/商号/法人番号
   const ins = db.prepare(`INSERT OR IGNORE INTO awards
-    (case_no, name, award_date, amount, category, ministry_code, winner_name, corporate_no, fiscal_year, source, first_seen)
+    (case_no, name, award_date, amount, ministry_code, method_code, winner_name, corporate_no, fiscal_year, source, first_seen)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
   db.exec('BEGIN');
   try {
     for (const r of rows) {
-      const [caseNo, name, date, amount, category, ministry, winner, corpNo] = r;
+      const [caseNo, name, date, amount, ministry, method, winner, corpNo] = r;
       if (!caseNo || !date) continue;
-      const res = ins.run(caseNo, name, date, Math.floor(Number(amount) || 0), category,
-        ministry, winner, /^\d{13}$/.test(corpNo) ? corpNo : '', fiscalYear, source, now);
+      const res = ins.run(caseNo, name, date, Math.floor(Number(amount) || 0), ministry,
+        method, winner, /^\d{13}$/.test(corpNo) ? corpNo : '', fiscalYear, source, now);
       n += res.changes;
     }
     db.exec('COMMIT');
@@ -109,6 +111,7 @@ if (mode === 'all') {
 }
 
 rebuildCompanies(db);
+seedOrgans(db);
 const stats = db.prepare(`SELECT COUNT(*) c FROM awards`).get();
 const comps = db.prepare(`SELECT COUNT(*) c FROM companies`).get();
 console.log(`awards合計: ${stats.c}件 / companies: ${comps.c}社`);

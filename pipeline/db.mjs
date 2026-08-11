@@ -14,11 +14,11 @@ export function openDb() {
     CREATE TABLE IF NOT EXISTS awards (             -- 落札実績（GEPS。P2で自治体も同居）
       case_no       TEXT NOT NULL,                  -- 調達案件番号
       name          TEXT NOT NULL,                  -- 案件名
-      award_date    TEXT NOT NULL,                  -- 落札日 (YYYY-MM-DD)
-      amount        INTEGER,                        -- 落札金額（円・小数切捨て）
-      category      TEXT,                           -- 区分コード (S1等)
-      ministry_code TEXT,                           -- 府省コード
-      winner_name   TEXT,                           -- 落札者名称
+      award_date    TEXT NOT NULL,                  -- 落札決定日 (YYYY-MM-DD)
+      amount        INTEGER,                        -- 落札価格（円・小数切捨て）
+      ministry_code TEXT,                           -- 府省コード（2桁: A1〜JB。仕様書3.1）
+      method_code   TEXT,                           -- 入札方式コード（7桁: 8002010等。仕様書3.2）
+      winner_name   TEXT,                           -- 商号又は名称
       corporate_no  TEXT,                           -- 法人番号（13桁。無い行は空文字）
       fiscal_year   INTEGER,                        -- 取得元ファイルの年度
       source        TEXT NOT NULL,                  -- geps_all / geps_diff / 自治体slug
