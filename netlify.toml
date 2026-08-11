@@ -1,0 +1,7 @@
+# ビルドはGitHub Actionsで実行し、dist成果物のみをNetlifyへデプロイする方針。
+# Netlify側のビルドは無効化（コマンドなし・publishのみ）。
+[build]
+  publish = "site/dist"
+
+[functions]
+  directory = "netlify/functions"

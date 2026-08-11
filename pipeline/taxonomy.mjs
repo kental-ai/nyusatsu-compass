@@ -2,7 +2,8 @@
 // 評価は配列順（特化 → 汎用）。最初にマッチした分類を採用する。
 // 変更時は classify_rules.mjs を再実行（全件再分類しても数秒）。
 export const TAXONOMY = [
-  { slug: 'seiso',    label: '清掃',               re: /清掃|除染|消毒/ },
+  { slug: 'josen',    label: '除染・災害復旧',      re: /除染|災害復旧|被災建物/ },
+  { slug: 'seiso',    label: '清掃',               re: /清掃|消毒/ },
   { slug: 'keibi',    label: '警備',               re: /警備|監視業務|守衛/ },
   { slug: 'ryokka',   label: '緑地・除草・剪定',    re: /除草|剪定|緑地|植栽|樹木/ },
   { slug: 'haiki',    label: '廃棄物処理',          re: /廃棄|処分|焼却|リサイクル|産廃/ },
