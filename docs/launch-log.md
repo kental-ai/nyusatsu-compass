@@ -10,8 +10,10 @@
 
 ## 残タスク（公開直後）
 
-- [ ] Build hook作成 + GitHub secret `NETLIFY_BUILD_HOOK` 登録（毎朝6時の自動更新）
-- [ ] Search Console登録（プロパティ追加→所有権確認→sitemap.xml送信）
-- [ ] IndexNow導入（hojokin-db/indexnow.mjs流用）
+- [x] Build hook作成 + GitHub secret `NETLIFY_BUILD_HOOK` 登録 — 2026-08-11 手動実行で開通確認済み
+- [x] Search Console登録・sitemap.xml送信 — 2026-08-11
+- [x] IndexNow導入 — 2026-08-11 全16,755URLを送信（HTTP 200）。日次は中核ページのみ通知
 - [ ] アラートフォームの送信テスト（Netlify Forms側の受信確認）
+- [ ] 日次バッチへのIndexNow組み込み（Netlifyビルド後に実行する仕組み。現状は手動）
 - [ ] 配信メール（毎朝の新着アラート）実装 — 登録者が付き始めてから
+- [ ] KKJ公告の取り込み（アラート原料。P2）・自治体落札データ（P2）
