@@ -72,8 +72,8 @@ const CSS = `
 :root{--navy:#16324F;--cream:#FDF6EC;--coral:#E8604C;--brass:#F4B942;--shallow:#EAF2F8;
 --ink:#1D3149;--sub:#4A5A6E;--line:#E4DACA;--bg:#FBF5EA;--acc:#16324F}
 *{box-sizing:border-box}
-body{margin:0;font-family:'M PLUS Rounded 1c','Hiragino Maru Gothic ProN','Hiragino Sans',Meiryo,sans-serif;color:var(--ink);background:#FFFDF8;line-height:1.75}
-h1,h2,h3,.mk{font-family:'Zen Maru Gothic','M PLUS Rounded 1c',sans-serif}
+body{margin:0;font-family:'BIZ UDPGothic','Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif;color:var(--ink);background:#FFFDF8;line-height:1.75}
+h1,h2,h3,.mk{font-family:'Zen Maru Gothic','BIZ UDPGothic',sans-serif}
 main{max-width:960px;margin:0 auto;padding:16px}
 h1{font-size:1.55rem;line-height:1.45;color:var(--navy)}
 h2{font-size:1.15rem;color:var(--navy);border-left:5px solid var(--coral);padding-left:10px;margin-top:2.2em;border-radius:0}
@@ -162,7 +162,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta name="twitter:card" content="summary">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=M+PLUS+Rounded+1c:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 </head><body>
 <header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/shindan/">10秒診断をやってみる</a></div></header>
