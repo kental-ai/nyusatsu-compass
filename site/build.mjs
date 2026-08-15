@@ -44,6 +44,29 @@ for (const a of AWARDS) {
 }
 const companyName = new Map(COMPANIES.map((c) => [c.corporate_no, c.name]));
 
+// 案件名クラスタ（同一契約の年次繰り返しを検出。企業ページの「契約ヒストリー」と次回予測の基盤）
+const normName = (n) => n.replace(/令和\d+年度?|平成\d+年度?|Ｒ\d+|R\d+|[０-９0-9]+|（[^）]*）|\([^)]*\)|【[^】]*】|[　\s]/g, '');
+const clusters = new Map(); // normKey|ministry → awards[]
+for (const a of AWARDS) {
+  const k = normName(a.name) + '|' + a.ministry_code;
+  if (k.length < 8) continue; // 正規化で短くなりすぎた名前はノイズ
+  (clusters.get(k) ?? clusters.set(k, []).get(k)).push(a);
+}
+// 機関×分野 → 企業ランキング（「同じ土俵の企業」相互リンク用）
+const pairCompanies = new Map(); // ministry|slug → Map(corpNo→count)
+for (const a of AWARDS) {
+  if (!a.corporate_no || !a.slug || a.slug === 'other') continue;
+  const k = a.ministry_code + '|' + a.slug;
+  const m = pairCompanies.get(k) ?? pairCompanies.set(k, new Map()).get(k);
+  m.set(a.corporate_no, (m.get(a.corporate_no) || 0) + 1);
+}
+const clusterKey = (a) => normName(a.name) + '|' + a.ministry_code;
+const monthMode = (list) => {
+  const m = {};
+  for (const a of list) { const mm = Number(a.award_date?.slice(5, 7)); if (mm) m[mm] = (m[mm] || 0) + 1; }
+  return Number(Object.keys(m).sort((x, y) => m[y] - m[x])[0] || 0);
+};
+
 // ---------- レイアウト ----------
 const CSS = `
 :root{--ink:#1a2333;--sub:#5a6472;--line:#dde3ea;--acc:#0f6ab2;--bg:#f7f9fb}
@@ -74,6 +97,16 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
   const crumbHtml = crumb.length
     ? `<nav class="crumb">${[['トップ', '/'], ...crumb].map(([t, h], i, arr) =>
         i === arr.length - 1 ? esc(t) : `<a href="${h}">${esc(t)}</a>`).join(' › ')}</nav>` : '';
+  // パンくず構造化データ + ページ固有JSON-LDを併記
+  const breadcrumb = crumb.length ? {
+    '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+    itemListElement: [['トップ', '/'], ...crumb].map(([t, h], i, arr) => ({
+      '@type': 'ListItem', position: i + 1, name: t,
+      ...(i < arr.length - 1 ? { item: ORIGIN + h } : {}),
+    })),
+  } : null;
+  jsonld = [breadcrumb, jsonld].filter(Boolean);
+  jsonld = jsonld.length === 0 ? null : jsonld.length === 1 ? jsonld[0] : jsonld;
   const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
@@ -96,6 +129,7 @@ ${body}
   const file = join(DIST, path.replace(/\/$/, '/index.html').replace(/^\//, ''));
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, html);
+  if (!noindex) urls.push(canonical); // noindexページはsitemapに載せない
   return canonical;
 }
 
@@ -195,11 +229,11 @@ for (const t of TAXONOMY) {
   mkdirSync(dirname(dataFile), { recursive: true });
   writeFileSync(dataFile, JSON.stringify({ mins: minsUsed, rows: toolRows }));
 
-  urls.push(page(`/price/${t.slug}/`, {
+  page(`/price/${t.slug}/`, {
     title: `${t.label}の入札はいくらで落ちる? 落札相場と${list.length.toLocaleString()}件の実績検索 | ${SITE}`,
     desc: `官公庁の「${t.label}」入札の落札相場。過去${list.length.toLocaleString()}件からあなたの案件に近い落札事例を検索し、金額帯・発注時期・落札企業の実データで「いくらで入れるか」の判断材料を提供。`,
     crumb: [['落札相場', '/price/'], [t.label, '']],
-    jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${t.label}の落札実績データ`, description: `国の機関の${t.label}に関する落札実績${list.length}件の統計`, license: 'https://www.digital.go.jp/resources/open_data/', creator: { '@type': 'Organization', name: SITE } },
+    jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${t.label}の落札実績データ`, description: `国の機関の${t.label}に関する落札実績${list.length}件の統計`, license: 'https://www.digital.go.jp/copyright-policy/', creator: { '@type': 'Organization', name: SITE } },
     body: `<h1>${t.label}の入札はいくらで落ちる?</h1>
 <p class="meta">調達ポータル公表の落札実績（2013年度〜）のうち「${t.label}」${list.length.toLocaleString()}件のデータ。毎日更新。</p>
 ${insights(list, `${t.label}`)}
@@ -221,49 +255,116 @@ ${bandTable(list)}
 <h2>落札件数の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
 <h2>入札方式の内訳</h2>${groupTable(list, (a) => a.method_code, (k) => BIDDING_METHODS[k] || k)}
 <h2>直近の落札事例</h2>${awardRows(recent)}`,
-  }));
+  });
 }
 
 // 相場ハブ
-urls.push(page('/price/', {
+page('/price/', {
   title: `業務別の落札相場一覧 | ${SITE}`,
   desc: '官公庁入札の落札相場を業務分類別に公開。清掃・警備・システム開発など、実データに基づく落札価格の水準がわかります。',
   crumb: [['落札相場', '']],
   body: `<h1>業務別の落札相場</h1><ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS)
     .map((t) => `<li><a href="/price/${t.slug}/">${t.label}</a>（${(byCat.get(t.slug) || []).length.toLocaleString()}件）</li>`).join('')}</ul>`,
-}));
+});
 
-// 企業ページ
+// 企業ページ（概況文・契約ヒストリー・次回予測・同じ土俵の企業）
 let companyCount = 0;
 for (const [corpNo, list] of byCompany) {
   if (list.length < MIN_COMPANY_AWARDS) continue;
   companyCount++;
   const name = companyName.get(corpNo) || list[0].winner_name;
   const total = list.reduce((s, a) => s + (a.amount || 0), 0);
-  urls.push(page(`/company/${corpNo}/`, {
+  const years = list.map((a) => a.award_date?.slice(0, 4)).filter(Boolean);
+  const yMin = Math.min(...years), yMax = Math.max(...years);
+
+  // 概況文（機械生成・ページ固有）
+  const minTop = [...list.reduce((m, a) => m.set(a.ministry_code, (m.get(a.ministry_code) || 0) + 1), new Map()).entries()]
+    .sort((x, y) => y[1] - x[1])[0];
+  const catCount = list.reduce((m, a) => (a.slug && a.slug !== 'other' ? m.set(a.slug, (m.get(a.slug) || 0) + 1) : m), new Map());
+  const catTop = [...catCount.entries()].sort((x, y) => y[1] - x[1])[0];
+  const summary = `${name}は、${MINISTRIES[minTop[0]] || '国の機関'}を中心に` +
+    (catTop ? `「${LABEL[catTop[0]]}」分野で` : '') +
+    `${yMin === yMax ? `${yMin}年` : `${yMin}〜${yMax}年`}に落札実績${list.length.toLocaleString()}件・総額${yen(total)}。`;
+
+  // 契約ヒストリー: この会社の案件が属するクラスタのうち、複数年繰り返しているもの
+  const seen = new Set();
+  const histories = [];
+  for (const a of list) {
+    const k = clusterKey(a);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const cl = clusters.get(k);
+    if (!cl || cl.length < 2) continue;
+    const clYears = new Set(cl.map((x) => x.award_date?.slice(0, 4)));
+    if (clYears.size < 2) continue;
+    histories.push({ a, cl: [...cl].sort((x, y) => (x.award_date < y.award_date ? 1 : -1)), years: clYears.size });
+  }
+  histories.sort((x, y) => y.years - x.years);
+  const histHtml = histories.slice(0, 5).map(({ a, cl }) => {
+    const m = monthMode(cl);
+    const latestYear = Math.max(...cl.map((x) => Number(x.award_date?.slice(0, 4)) || 0));
+    const thisYear = new Date().getFullYear();
+    const pubM = ((m + 10 - 1) % 12) + 1;
+    const forecast = latestYear >= thisYear - 1
+      ? `例年${m}月頃に落札 → <b>次回公告の目安は${pubM}月頃</b>`
+      : `直近${latestYear}年を最後に実績が途切れています`;
+    return `<h3>${esc(a.name)}</h3>
+<p class="meta">${forecast}</p>
+<div class="wrap"><table><tr><th>落札日</th><th>落札者</th><th>落札価格</th></tr>
+${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no === corpNo ? `<b>${esc(x.winner_name)}</b>` : (x.corporate_no ? `<a href="/company/${x.corporate_no}/">${esc(x.winner_name)}</a>` : esc(x.winner_name))}</td><td class="num">${yen(x.amount)}</td></tr>`).join('\n')}
+</table></div>`;
+  }).join('\n');
+
+  // 同じ土俵の企業（主戦場= 最頻の機関×分野 の他社）
+  let cohortHtml = '';
+  if (catTop) {
+    const pk = minTop[0] + '|' + catTop[0];
+    const cohort = [...(pairCompanies.get(pk) || new Map()).entries()]
+      .filter(([no]) => no !== corpNo && (byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS)
+      .sort((x, y) => y[1] - x[1]).slice(0, 10);
+    if (cohort.length) {
+      cohortHtml = `<h2>同じ土俵の企業（${MINISTRIES[minTop[0]] || ''}×${LABEL[catTop[0]]}）</h2>
+<ul>${cohort.map(([no, n]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（${n.toLocaleString()}件）</li>`).join('')}</ul>`;
+    }
+  }
+
+  page(`/company/${corpNo}/`, {
     title: `${name}の落札実績【${list.length.toLocaleString()}件】入札・落札情報 | ${SITE}`,
-    desc: `${name}（法人番号${corpNo}）の官公庁入札の落札実績。落札${list.length.toLocaleString()}件・総額${yen(total)}。取引の多い機関・業務分野・直近の落札案件をデータで公開。`,
+    desc: `${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
-    jsonld: { '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo },
+    jsonld: { '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` },
     body: `<h1>${esc(name)}の落札実績</h1>
 <p class="meta">法人番号 ${corpNo}。調達ポータル公表の落札実績オープンデータに基づく。</p>
+<p class="insight">${esc(summary)}${histories.length ? ` 複数年にわたり繰り返し発注されている継続契約${histories.length}件に関与しています（下記に履歴と次回公告の目安）。` : ''}</p>
 ${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', yen(total)], ['直近の落札', list[0].award_date]])}
+${histHtml ? `<h2>継続契約の落札履歴と次回予測</h2>
+<p class="meta">この会社が関わる案件のうち、複数年繰り返し発注されているもの。過去に誰がいくらで落札してきたかの履歴です。</p>${histHtml}` : ''}
 <h2>取引の多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => `/organ/${k.toLowerCase()}/`)}
 <h2>業務分野</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
+${cohortHtml}
 <h2>直近の落札案件</h2>${awardRows(list.slice(0, RECENT_LIMIT), { company: false })}`,
-  }));
+  });
 }
 
-// 企業ハブ（落札件数トップ100のみ列挙。全社はsitemapから）
+// 企業ハブ（全社をページネーションで列挙 → 内部リンク孤児をなくす）
 const topCompanies = [...byCompany.entries()].filter(([, l]) => l.length >= MIN_COMPANY_AWARDS)
   .sort((x, y) => y[1].length - x[1].length);
-urls.push(page('/company/', {
-  title: `官公庁入札の落札企業データベース（${companyCount.toLocaleString()}社） | ${SITE}`,
-  desc: '官公庁入札で落札実績のある企業を法人番号ベースで収録。企業ごとの落札件数・金額・取引機関を公開。',
-  crumb: [['落札企業', '']],
-  body: `<h1>落札企業データベース</h1><p>${companyCount.toLocaleString()}社を収録。落札件数トップ100:</p>
-<ol>${topCompanies.slice(0, 100).map(([no, l]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ol>`,
-}));
+const PER_PAGE = 200;
+const hubPages = Math.ceil(topCompanies.length / PER_PAGE);
+for (let p = 0; p < hubPages; p++) {
+  const slice = topCompanies.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+  const path = p === 0 ? '/company/' : `/company/page/${p + 1}/`;
+  const nav = `<p>${p > 0 ? `<a href="${p === 1 ? '/company/' : `/company/page/${p}/`}">← 前へ</a>　` : ''}${p + 1} / ${hubPages}ページ${p < hubPages - 1 ? `　<a href="/company/page/${p + 2}/">次へ →</a>` : ''}</p>`;
+  page(path, {
+    title: p === 0 ? `官公庁入札の落札企業データベース（${companyCount.toLocaleString()}社） | ${SITE}`
+      : `落札企業一覧 ${p + 1}ページ目（落札件数順） | ${SITE}`,
+    desc: `官公庁入札で落札実績のある企業${companyCount.toLocaleString()}社を法人番号ベースで収録。落札件数順の一覧${p + 1}ページ目。`,
+    crumb: p === 0 ? [['落札企業', '']] : [['落札企業', '/company/'], [`${p + 1}ページ目`, '']],
+    body: `<h1>落札企業データベース${p > 0 ? `（${p + 1}ページ目）` : ''}</h1>
+<p>官公庁入札で落札実績のある${companyCount.toLocaleString()}社を収録（落札件数順）。</p>${nav}
+<ol start="${p * PER_PAGE + 1}">${slice.map(([no, l]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ol>${nav}`,
+  });
+}
 
 // 機関ページ
 let organCount = 0;
@@ -271,7 +372,7 @@ for (const [code, list] of byMinistry) {
   const name = MINISTRIES[code];
   if (!name || list.length < MIN_PRICE_AWARDS) continue;
   organCount++;
-  urls.push(page(`/organ/${code.toLowerCase()}/`, {
+  page(`/organ/${code.toLowerCase()}/`, {
     title: `${name}の入札 落札結果・落札企業【${list.length.toLocaleString()}件】 | ${SITE}`,
     desc: `${name}の入札・落札結果アーカイブ。落札実績${list.length.toLocaleString()}件から、よく発注される業務・落札の多い企業・直近の落札事例を公開。`,
     crumb: [['発注機関', '/organ/'], [name, '']],
@@ -282,20 +383,20 @@ ${insights(list, name)}
 <h2>発注の多い業務</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
 <h2>落札の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
 <h2>直近の落札事例</h2>${awardRows(list.slice(0, RECENT_LIMIT))}`,
-  }));
+  });
 }
-urls.push(page('/organ/', {
+page('/organ/', {
   title: `発注機関別の落札結果一覧 | ${SITE}`,
   desc: '国の機関別に落札結果を集約。省庁ごとの発注傾向・落札企業がわかります。',
   crumb: [['発注機関', '']],
   body: `<h1>発注機関別の落札結果</h1><ul>${[...byMinistry.entries()].filter(([c, l]) => MINISTRIES[c] && l.length >= MIN_PRICE_AWARDS)
     .sort((x, y) => y[1].length - x[1].length)
     .map(([c, l]) => `<li><a href="/organ/${c.toLowerCase()}/">${MINISTRIES[c]}</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ul>`,
-}));
+});
 
 // アラートLP（POSTはNetlify Functionで中継。hidden formはNetlify Formsの検出用）
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
-urls.push(page('/alert/', {
+page('/alert/', {
   title: `無料の入札新着アラート | ${SITE}`,
   desc: '業種と地域を登録するだけで、官公庁・自治体の新着入札案件を毎朝メールでお知らせします。無料。',
   body: `<h1>あなた向けの入札機会レポートを、月1回無料で</h1>
@@ -315,14 +416,15 @@ ${PREFS.map((p) => `<option>${p}</option>`).join('')}</select></label></p>
 <p><button type="submit" style="background:#0f6ab2;color:#fff;border:0;padding:12px 32px;border-radius:6px;font-weight:700;font-size:1rem">無料で登録する</button></p>
 </form>
 <p class="meta">登録いただいたメールアドレスは案件通知以外に使用しません。配信はいつでも停止できます。</p>`,
-}));
-urls.push(page('/alert/thanks/', {
+});
+page('/alert/thanks/', {
   title: `登録ありがとうございます | ${SITE}`,
   desc: '入札新着アラートの登録を受け付けました。',
   noindex: true,
-  body: `<h1>登録を受け付けました</h1>
-<p>配信の準備ができ次第、毎朝の新着案件メールをお届けします。それまでの間は<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
-}));
+  body: `<h1>送信を受け付けました</h1>
+<p>レポート登録の方は、配信の準備ができ次第メールでお届けします。お問い合わせの方は、確認のうえご連絡します。</p>
+<p>それまでの間は<a href="/shindan/">入札機会診断</a>や<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
+});
 
 // 入札機会診断（10秒診断の入札版。統計は事前計算、定番案件はカテゴリdata.jsonから動的算出）
 const shindanStats = TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).map((t) => {
@@ -346,7 +448,7 @@ mkdirSync(join(DIST, 'shindan'), { recursive: true });
 writeFileSync(join(DIST, 'shindan', 'data.json'),
   JSON.stringify({ mins: MINISTRIES, cats: shindanStats }));
 
-urls.push(page('/shindan/', {
+page('/shindan/', {
   title: `入札機会診断 — あなたの業種の官公庁市場が10秒でわかる | ${SITE}`,
   desc: '業種を選ぶだけで、官公庁入札の年間発注件数・金額・発注機関・落札相場・公告シーズン・毎年出る定番案件がその場でわかる無料診断。登録不要。',
   crumb: [['入札機会診断', '']],
@@ -359,29 +461,55 @@ urls.push(page('/shindan/', {
 <div id="sout"></div>
 </div>
 <script defer src="/assets/shindan.js"></script>`,
-}));
+});
 
 // about / policy
-urls.push(page('/about/', {
+page('/about/', {
   title: `運営者情報・データについて | ${SITE}`,
   desc: '入札コンパスのデータソースと運営方針。',
   body: `<h1>運営者情報・データについて</h1>
-<p>${SITE}は、官公庁入札の落札相場・落札実績を公開データから構造化して提供するサービスです。</p>
-<h2>データソース</h2>
-<ul><li>調達ポータル「落札実績オープンデータ」（デジタル庁）— 政府標準利用規約に準拠して利用</li>
+<p>${SITE}は、官公庁入札の落札相場・落札実績を公開データから構造化して提供するサービスです。
+「この案件はいくらで落ちるのか」「どの機関がいつ発注するのか」という入札実務の判断を、
+推測ではなく実データで支えることを目的としています。</p>
+<h2>データの方法論</h2>
+<ul>
+<li><b>収集元</b>: 調達ポータル「落札実績オープンデータ」（デジタル庁公表・2013年度〜）を毎日取得し、
+法人番号で名寄せ・業務分類を付与して構造化しています</li>
+<li><b>更新</b>: 毎朝、前日までの新規落札データを自動で反映します（各ページ下部に最終更新日を表示）</li>
+<li><b>業務分類</b>: 案件名からルールベースで自動分類しています（現在31分類・分類率約84%）。
+分類の誤りを見つけた場合はお知らせください</li>
+<li><b>金額</b>: 落札価格は公表データの値をそのまま表示しています（税抜/税込は公表元に依存します）</li>
+</ul>
+<h2>データの限界（正直な注意書き）</h2>
+<ul>
+<li>現在の収録範囲は<b>国の機関（府省・独立行政法人等）の落札実績</b>です。
+<b>都道府県・市区町村の入札は未収録</b>で、順次追加予定です</li>
+<li>収録元は政府電子調達（GEPS）経由の案件が中心のため、一部の省庁調達
+（例: 地方整備局の工事の一部）は含まれない場合があります</li>
+<li>「次回公告の目安」は過去の繰り返しパターンからの推定であり、発注を保証するものではありません</li>
+</ul>
+<h2>データソースと利用規約</h2>
+<ul><li>調達ポータル「落札実績オープンデータ」（デジタル庁）— <a href="https://www.digital.go.jp/copyright-policy/" rel="noopener">政府標準利用規約</a>に準拠して利用</li>
 <li>官公需情報ポータルサイト（中小企業庁）検索API — 公告情報の取得に利用</li></ul>
 <p>本サービスは官公需情報ポータルサイトのAPIを利用しています: <a href="https://www.kkj.go.jp/s/" rel="noopener">官公需情報ポータルサイト</a></p>`,
-}));
-urls.push(page('/policy/', {
+});
+page('/policy/', {
   title: `掲載ポリシー・削除依頼 | ${SITE}`,
   desc: '掲載情報の方針と訂正・削除依頼の窓口。',
   body: `<h1>掲載ポリシー・削除依頼</h1>
 <p>掲載している落札実績は、国の機関が公表した公開情報（調達ポータル 落札実績オープンデータ等）をそのまま構造化したものです。</p>
-<p>掲載内容の誤り、法人情報の訂正・削除のご依頼は、公表元データの確認のうえ対応します。お問い合わせはトップページ記載の窓口まで。</p>`,
-}));
+<p>掲載内容の誤り、法人情報の訂正・削除のご依頼は、以下のフォームからお送りください。公表元データを確認のうえ対応します。</p>
+<form name="contact" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
+<input type="hidden" name="form-name" value="contact">
+<p style="display:none"><label>入力しないでください: <input name="bot-field"></label></p>
+<p><label>ご連絡先メールアドレス<br><input type="email" name="email" required style="width:100%;max-width:400px;padding:8px"></label></p>
+<p><label>内容（対象ページのURLと依頼内容）<br><textarea name="message" required rows="5" style="width:100%;max-width:560px;padding:8px"></textarea></label></p>
+<p><button type="submit" style="background:#0f6ab2;color:#fff;border:0;padding:10px 24px;border-radius:6px;font-weight:700">送信する</button></p>
+</form>`,
+});
 
 // トップ
-urls.push(page('/', {
+page('/', {
   title: `${SITE} | 官公庁入札の落札相場・落札実績データベース`,
   desc: `官公庁入札の落札相場と落札実績${AWARDS.length.toLocaleString()}件を無料公開。業務別の相場、企業別の落札履歴、機関別の発注傾向がわかる入札の判断支援データベース。`,
   jsonld: { '@context': 'https://schema.org', '@type': 'WebSite', name: SITE, url: ORIGIN },
@@ -392,7 +520,7 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
 <p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a></p>`,
-}));
+});
 
 // 類似案件検索エンジン（全相場ページ共通・キャッシュされる）
 mkdirSync(join(DIST, 'assets'), { recursive: true });
