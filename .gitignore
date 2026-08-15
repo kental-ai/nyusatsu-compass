@@ -1,4 +1,5 @@
-data/
+data/*
+!data/snapshots/
 node_modules/
 .env
 site/dist/

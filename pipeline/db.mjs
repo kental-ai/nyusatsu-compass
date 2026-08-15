@@ -64,6 +64,25 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_notices_issue ON notices (issue_date);
     CREATE INDEX IF NOT EXISTS idx_notices_slug ON notices (slug);
 
+    CREATE TABLE IF NOT EXISTS local_awards (       -- 自治体の入札結果（P2。スナップショット供給）
+      src         TEXT NOT NULL,
+      org         TEXT NOT NULL,
+      dept        TEXT,
+      pref        TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      open_date   TEXT,
+      category    TEXT,
+      method      TEXT,
+      winner_name TEXT,
+      corporate_no TEXT,
+      amount      INTEGER,
+      slug        TEXT,
+      fiscal_year INTEGER,
+      first_seen  TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_local ON local_awards (src, org, name, open_date, corporate_no, amount);
+    CREATE INDEX IF NOT EXISTS idx_local_corp ON local_awards (corporate_no);
+
     CREATE TABLE IF NOT EXISTS fetch_log (          -- 取得履歴（差分運用と失敗検知）
       source        TEXT NOT NULL,
       key           TEXT NOT NULL,                  -- ファイル名や日付

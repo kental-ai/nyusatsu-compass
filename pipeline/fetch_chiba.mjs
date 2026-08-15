@@ -94,7 +94,7 @@ async function collectKikan(nendo, kikan, range = null) {
 
 // ---- main ----
 const nendo = process.argv[2] || '2025';
-const kikansArg = process.argv[3] || '1200000';
+const kikansArg = process.argv[3] || '1200000'; // 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）
 
 const db = openDb();
 db.exec(`
@@ -122,7 +122,7 @@ db.exec(`
 await req();
 await req({ ejParameterID: 'StartPage', KikanNO: 'null' });
 
-const kikans = kikansArg.split(',');
+const kikans = kikansArg === 'all' ? [''] : kikansArg.split(',');
 const now = new Date().toISOString();
 const ins = db.prepare(`INSERT OR IGNORE INTO local_awards
   (src, org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, first_seen)
