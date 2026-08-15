@@ -111,7 +111,14 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
-<link rel="canonical" href="${canonical}">${noindex ? '\n<meta name="robots" content="noindex">' : ''}
+<link rel="canonical" href="${canonical}">${noindex ? '\n<meta name="robots" content="noindex">' : '\n<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">'}
+<meta property="og:site_name" content="${SITE}">
+<meta property="og:type" content="${path === '/' ? 'website' : 'article'}">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:url" content="${canonical}">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary">
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 </head><body>
 <header><div class="in"><a class="logo" href="/">${SITE}</a><a href="/alert/">無料の新着アラート</a></div></header>
@@ -249,8 +256,8 @@ for (const t of TAXONOMY) {
   writeFileSync(dataFile, JSON.stringify({ mins: minsUsed, rows: toolRows }));
 
   page(`/price/${t.slug}/`, {
-    title: `${t.label}の入札はいくらで落ちる? 落札相場と${list.length.toLocaleString()}件の実績検索 | ${SITE}`,
-    desc: `官公庁の「${t.label}」入札の落札相場。過去${list.length.toLocaleString()}件からあなたの案件に近い落札事例を検索し、金額帯・発注時期・落札企業の実データで「いくらで入れるか」の判断材料を提供。`,
+    title: `${t.label}の落札相場・落札価格【官公庁 実績${list.length.toLocaleString()}件】｜${SITE}`,
+    desc: `${t.label}の入札はいくらで落ちる? 落札価格の中央値は${yen(med)}（実績${list.length.toLocaleString()}件・毎日更新）。金額帯別の相場・発注機関・落札企業・公告時期に加え、類似案件検索で自社案件の値付けの目安がわかります。`,
     crumb: [['落札相場', '/price/'], [t.label, '']],
     lastmod: list[0]?.award_date,
     jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${t.label}の落札実績データ`, description: `国の機関の${t.label}に関する落札実績${list.length}件の統計`, license: 'https://www.digital.go.jp/copyright-policy/', creator: { '@type': 'Organization', name: SITE } },
@@ -288,11 +295,18 @@ page('/price/', {
 });
 
 // 企業ページ（概況文・契約ヒストリー・次回予測・同じ土俵の企業）
+const nameCounts = new Map();
+for (const [no, l] of byCompany) {
+  if (l.length < MIN_COMPANY_AWARDS) continue;
+  const nm = companyName.get(no) || l[0].winner_name;
+  nameCounts.set(nm, (nameCounts.get(nm) || 0) + 1);
+}
 let companyCount = 0;
 for (const [corpNo, list] of byCompany) {
   if (list.length < MIN_COMPANY_AWARDS) continue;
   companyCount++;
   const name = companyName.get(corpNo) || list[0].winner_name;
+  const dupName = (nameCounts.get(name) || 0) > 1; // 同名別法人はtitleに法人番号を併記して重複回避
   const total = list.reduce((s, a) => s + (a.amount || 0), 0);
   const years = list.map((a) => a.award_date?.slice(0, 4)).filter(Boolean);
   const yMin = Math.min(...years), yMax = Math.max(...years);
@@ -419,7 +433,7 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
   }
 
   page(`/company/${corpNo}/`, {
-    title: `${name}の落札実績【${list.length.toLocaleString()}件】入札・落札情報 | ${SITE}`,
+    title: `${name}の落札実績・入札情報【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
     desc: `${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
     lastmod: list[0]?.award_date,
@@ -466,8 +480,8 @@ for (const [code, list] of byMinistry) {
   if (!name || list.length < MIN_PRICE_AWARDS) continue;
   organCount++;
   page(`/organ/${code.toLowerCase()}/`, {
-    title: `${name}の入札 落札結果・落札企業【${list.length.toLocaleString()}件】 | ${SITE}`,
-    desc: `${name}の入札・落札結果アーカイブ。落札実績${list.length.toLocaleString()}件から、よく発注される業務・落札の多い企業・直近の落札事例を公開。`,
+    title: `${name}の入札結果・落札結果一覧【${list.length.toLocaleString()}件】｜${SITE}`,
+    desc: `${name}の入札結果・落札結果を${list.length.toLocaleString()}件収録（毎日更新）。落札企業ランキング・よく発注される業務・発注時期のパターン・直近の落札一覧を公式公表データから構造化して公開。`,
     crumb: [['発注機関', '/organ/'], [name, '']],
     lastmod: list[0]?.award_date,
     body: `<h1>${esc(name)}の落札結果</h1>
@@ -673,7 +687,7 @@ page('/policy/', {
 
 // トップ
 page('/', {
-  title: `${SITE} | 官公庁入札の落札相場・落札実績データベース`,
+  title: `${SITE}｜官公庁入札の落札相場・入札結果データベース`,
   desc: `官公庁入札の落札相場と落札実績${AWARDS.length.toLocaleString()}件を無料公開。業務別の相場、企業別の落札履歴、機関別の発注傾向がわかる入札の判断支援データベース。`,
   jsonld: { '@context': 'https://schema.org', '@type': 'WebSite', name: SITE, url: ORIGIN },
   body: `<h1>官公庁入札の落札相場・実績データベース</h1>
@@ -794,10 +808,34 @@ writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${ORI
 // Search Console所有権確認 + IndexNowキー（公開仕様）
 writeFileSync(join(DIST, 'googlea7352c9a5da5cbc1.html'), 'google-site-verification: googlea7352c9a5da5cbc1.html');
 writeFileSync(join(DIST, '68c8ff01b5ee8614e56c3a91ccbb8f59.txt'), '68c8ff01b5ee8614e56c3a91ccbb8f59');
-writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}
-官公庁入札の落札相場・落札実績データベース。調達ポータルの落札実績オープンデータ（2013年度〜、${AWARDS.length.toLocaleString()}件）を構造化し、
-業務別相場（/price/）、企業別落札実績（/company/）、機関別落札結果（/organ/）として公開している。
-データ出典: 調達ポータル落札実績オープンデータ（政府標準利用規約準拠）。毎日更新。
+writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}（nyusatsu-compass.com）
+
+> 日本の官公庁入札の落札相場・入札結果データベース。調達ポータル（デジタル庁）の落札実績
+> オープンデータ${AWARDS.length.toLocaleString()}件（2013年度〜）を毎日取得し、法人番号で名寄せ・業務分類して公開。
+> 「この業務はいくらで落ちるか」「この機関はいつ何を発注するか」「この会社は何を落札してきたか」に
+> 実データで答えるサイト。運営は独立系。データ出典は政府標準利用規約に準拠。
+
+## このサイトが答えられる質問の例
+
+- 「庁舎清掃の入札はいくらぐらいで落札される?」→ /price/seiso/（金額帯別の相場・類似案件検索）
+- 「国土交通省の入札結果・落札企業は?」→ /organ/s1/
+- 「◯◯株式会社の官公庁の落札実績は?」→ /company/{法人番号}/（契約履歴・次回公告の目安つき）
+- 「今週の官公庁入札の動き・業者が交代した契約は?」→ /weekly/
+- 「自分の業種の官公庁市場の規模・公告シーズンは?」→ /shindan/（無料10秒診断）
+
+## 主要ディレクトリ
+
+- /price/ : 業務別の落札相場（${priceCount}分類。中央値・金額帯分布・発注時期・落札企業・類似案件検索）
+${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 10).map((t) => `  - /price/${t.slug}/ : ${t.label}`).join('\n')}
+- /company/ : 落札企業データベース（${companyCount.toLocaleString()}社。落札履歴・継続契約の次回予測・同分野の競合）
+- /organ/ : 発注機関別の入札結果アーカイブ（${organCount}機関）
+- /weekly/ : 週間レポート（大型案件・契約リプレイス・新規参入の自動集計）
+- /shindan/ : 入札機会診断（業種別の市場データを即時表示する無料ツール）
+
+## データの範囲と限界
+
+収録は国の機関（府省・独立行政法人等）の落札実績。都道府県・市区町村は未収録（順次追加予定）。
+「次回公告の目安」は過去周期からの推定であり発注を保証しない。毎日更新（最終更新: ${BUILT_AT}）。
 `);
 const shards = [];
 for (let i = 0; i < urls.length; i += 10000) shards.push(urls.slice(i, i + 10000));
