@@ -105,7 +105,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
       ...(i < arr.length - 1 ? { item: ORIGIN + h } : {}),
     })),
   } : null;
-  jsonld = [breadcrumb, jsonld].filter(Boolean);
+  jsonld = [breadcrumb, ...(Array.isArray(jsonld) ? jsonld : [jsonld])].filter(Boolean);
   jsonld = jsonld.length === 0 ? null : jsonld.length === 1 ? jsonld[0] : jsonld;
   const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -194,6 +194,25 @@ function monthChart(list, caption) {
 <div class="bars">${mc.map((c, i) => `<div style="height:${Math.max(2, Math.round((c / mx) * 100))}%" title="${i + 1}月: ${c.toLocaleString()}件">${i === peak ? `<span class="blab">${c.toLocaleString()}</span>` : ''}</div>`).join('')}</div>
 <div class="xlab">${mc.map((_, i) => `<span>${i + 1}</span>`).join('')}</div>
 <p class="meta">${esc(caption)}の落札決定月の分布（1〜12月）。公告はおおむねこの1〜2ヶ月前に出ます。</p></div>`;
+}
+
+// 企業ランキング（件数順位→分析文の「上位◯%」に使用）
+const companyRank = new Map();
+{
+  const ranked = [...byCompany.entries()].map(([no, l]) => [no, l.length]).sort((x, y) => y[1] - x[1]);
+  ranked.forEach(([no], i) => companyRank.set(no, i + 1));
+}
+// 分野×金額帯の中央値（価格ポジション分析用）
+const bandOf = (amt) => BANDS.findIndex((b) => amt >= b.min && amt < b.max);
+const bandMedians = new Map(); // slug|band → median
+{
+  const tmp = new Map();
+  for (const a of AWARDS) {
+    if (!a.slug || a.slug === 'other' || !(a.amount > 0)) continue;
+    const k = a.slug + '|' + bandOf(a.amount);
+    (tmp.get(k) ?? tmp.set(k, []).get(k)).push(a.amount);
+  }
+  for (const [k, arr] of tmp) bandMedians.set(k, median(arr));
 }
 
 function groupTable(list, keyFn, labelFn, linkFn = null, limit = 10) {
@@ -315,6 +334,76 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
 </table></div>`;
   }).join('\n');
 
+  // データ分析プローズ（全文が実データ由来。条件を満たす文だけ出るため構成は社ごとに変わる）
+  const paras = [];
+  {
+    const rank = companyRank.get(corpNo);
+    const pct = Math.ceil((rank / byCompany.size) * 100);
+    if (pct <= 50) paras.push(`当サイトが収録する落札実績のある${byCompany.size.toLocaleString()}社のうち、${esc(name)}の落札件数は<b>第${rank.toLocaleString()}位（上位${pct}%）</b>にあたります。`);
+    // 継続性・活動期間
+    const ySet = [...new Set(years)].sort();
+    if (ySet.length >= 5) paras.push(`${ySet[0]}年から${ySet[ySet.length - 1]}年まで<b>${ySet.length}年にわたり継続的に受注</b>しており、官公需の常連事業者といえます。`);
+    else if (ySet.length === 1 && Number(ySet[0]) >= 2025) paras.push(`落札実績は${ySet[0]}年からで、<b>官公庁市場への参入は比較的最近</b>です。`);
+    // 機関依存度
+    const minShare = minTop[1] / list.length;
+    if (list.length >= 5 && minShare >= 0.8) paras.push(`落札の${Math.round(minShare * 100)}%が${MINISTRIES[minTop[0]]}に集中しており、<b>特定機関との取引が深い</b>タイプです。`);
+    else if (list.length >= 5 && minShare <= 0.4) paras.push(`取引機関が分散しており、<b>複数の省庁にまたがって受注できる体制</b>を持っています。`);
+    // 入札方式の傾向
+    const sogoWins = list.filter((a) => ['8002040', '8003040'].includes(a.method_code)).length;
+    const zuiWins = list.filter((a) => /^(8001|8004|8011|8014)/.test(a.method_code || '')).length;
+    if (sogoWins >= 2) paras.push(`総合評価方式での落札が${sogoWins}件あり、<b>価格だけでなく技術提案でも評価されている</b>ことがうかがえます。`);
+    if (list.length >= 5 && zuiWins / list.length >= 0.5) paras.push(`随意契約・オープンカウンタ経由の受注が${Math.round((zuiWins / list.length) * 100)}%を占め、少額案件の積み上げ型です。`);
+    // 価格ポジション（同分野×同金額帯の中央値と比較。比較可能3件以上のみ）
+    const ratios = [];
+    for (const a of list) {
+      if (!a.slug || a.slug === 'other' || !(a.amount > 0)) continue;
+      const bm = bandMedians.get(a.slug + '|' + bandOf(a.amount));
+      if (bm > 0) ratios.push(a.amount / bm);
+    }
+    if (ratios.length >= 3) {
+      const avg = ratios.reduce((s, r) => s + r, 0) / ratios.length;
+      if (avg <= 0.85) paras.push(`落札額を同分野・同規模帯の中央値と比べると平均${Math.round((1 - avg) * 100)}%低い水準にあり、<b>価格競争力で取りにいく傾向</b>が読み取れます。`);
+      else if (avg >= 1.15) paras.push(`落札額は同分野・同規模帯の中央値より平均${Math.round((avg - 1) * 100)}%高い水準で、<b>価格以外の要素（実績・仕様適合）で選ばれている</b>可能性があります。`);
+    }
+    // 成長トレンド
+    const recent2 = list.filter((a) => a.award_date >= '2024-01-01').length;
+    const prior2 = list.filter((a) => a.award_date >= '2022-01-01' && a.award_date < '2024-01-01').length;
+    if (prior2 >= 2 && recent2 >= prior2 * 1.5) paras.push(`直近2年の落札は${recent2}件と、その前の2年（${prior2}件）から<b>受注ペースが拡大</b>しています。`);
+    else if (prior2 >= 3 && recent2 <= prior2 * 0.5) paras.push(`直近2年の落札は${recent2}件と、その前の2年（${prior2}件）から減速しています。`);
+    // 契約奪取の検出（クラスタ内で直前の落札者が別業者だった勝ち）
+    for (const { cl } of histories.slice(0, 3)) {
+      const idx = cl.findIndex((x) => x.corporate_no === corpNo);
+      if (idx >= 0 && idx < cl.length - 1) {
+        const prev = cl[idx + 1];
+        if (prev.corporate_no && prev.corporate_no !== corpNo) {
+          const streak = cl.slice(idx + 1).filter((x) => x.corporate_no === prev.corporate_no).length;
+          paras.push(`「${esc(cl[idx].name)}」では、それまで${esc(prev.winner_name)}が${streak >= 2 ? `${streak}回` : ''}落札していた契約を${cl[idx].award_date.slice(0, 4)}年に<b>獲得（リプレイス）した実績</b>があります。`);
+          break;
+        }
+      }
+    }
+    // 1件あたりレンジ
+    const amts = list.map((a) => a.amount).filter((n) => n > 0);
+    if (amts.length >= 3) paras.push(`1件あたりの落札額は${yen(pctile(amts, 0.25))}〜${yen(pctile(amts, 0.75))}が中心レンジです。`);
+  }
+  const analysisHtml = paras.length >= 2 ? `<h2>データからみた${esc(name)}</h2>${paras.map((p) => `<p>${p}</p>`).join('\n')}
+<p class="meta">※本分析は公表データ（落札実績）のみに基づく機械的な集計であり、企業の信用力等を評価するものではありません。</p>` : '';
+
+  // FAQ（AI検索・リッチリザルト向け。回答は全て実データ）
+  const faqs = [];
+  faqs.push([`${name}は官公庁との取引実績がありますか?`,
+    `はい。当サイト収録範囲（国の機関・2013年度以降）で${list.length.toLocaleString()}件・総額${yen(total)}の落札実績があります。直近は${list[0].award_date}の「${list[0].name}」（${MINISTRIES[list[0].ministry_code] || '国の機関'}・${yen(list[0].amount)}）です。`]);
+  faqs.push([`${name}はどの機関のどんな案件を受注していますか?`,
+    `${MINISTRIES[minTop[0]] || '国の機関'}との取引が最も多く${minTop[1]}件${catTop ? `、業務分野では「${LABEL[catTop[0]]}」が中心` : ''}です。`]);
+  if (histories.length) {
+    const h = histories[0];
+    const m = monthMode(h.cl);
+    faqs.push([`${name}が関わる契約の次回公告はいつ頃ですか?`,
+      `「${h.a.name}」は例年${m}月頃に落札が決まっており、次回の公告は${((m + 10 - 1) % 12) + 1}月頃が目安です（過去の周期からの推定であり、発注を保証するものではありません）。`]);
+  }
+  const faqHtml = `<h2>よくある質問</h2>${faqs.map(([q, a]) => `<h3>Q. ${esc(q)}</h3><p>A. ${esc(a)}</p>`).join('\n')}`;
+  const faqLd = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) };
+
   // 同じ土俵の企業（主戦場= 最頻の機関×分野 の他社）
   let cohortHtml = '';
   if (catTop) {
@@ -332,17 +421,19 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
     title: `${name}の落札実績【${list.length.toLocaleString()}件】入札・落札情報 | ${SITE}`,
     desc: `${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
-    jsonld: { '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` },
+    jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` }, faqLd],
     body: `<h1>${esc(name)}の落札実績</h1>
 <p class="meta">法人番号 ${corpNo}。調達ポータル公表の落札実績オープンデータに基づく。</p>
 <p class="insight">${esc(summary)}${histories.length ? ` 複数年にわたり繰り返し発注されている継続契約${histories.length}件に関与しています（下記に履歴と次回公告の目安）。` : ''}</p>
 ${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', yen(total)], ['直近の落札', list[0].award_date]])}
+${analysisHtml}
 ${histHtml ? `<h2>継続契約の落札履歴と次回予測</h2>
 <p class="meta">この会社が関わる案件のうち、複数年繰り返し発注されているもの。過去に誰がいくらで落札してきたかの履歴です。</p>${histHtml}` : ''}
 <h2>取引の多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => `/organ/${k.toLowerCase()}/`)}
 <h2>業務分野</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
 ${cohortHtml}
-<h2>直近の落札案件</h2>${awardRows(list.slice(0, RECENT_LIMIT), { company: false })}`,
+<h2>直近の落札案件</h2>${awardRows(list.slice(0, RECENT_LIMIT), { company: false })}
+${faqHtml}`,
   });
 }
 
