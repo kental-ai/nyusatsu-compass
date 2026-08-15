@@ -1,0 +1,32 @@
+# 自治体データの日次増分取得 → スナップショット更新をコミット（pushがNetlifyビルドを自動起動）。
+# 対象は当年度のみ（過去分はバックフィル済みスナップショットに保持。公開保持期間が短いため
+# 「取り続けること」自体がアーカイブ資産になる）。
+name: daily-local-awards
+on:
+  schedule:
+    - cron: '0 20 * * *'   # 20:00 UTC = 5:00 JST（6:00の本ビルド前に完了させる）
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: スナップショット読込→当年度の増分取得→書き出し
+        run: |
+          node pipeline/snapshot_local.mjs import
+          Y=$(TZ=Asia/Tokyo date +%Y)
+          M=$(TZ=Asia/Tokyo date +%m)
+          FY=$Y; if [ "$M" -lt 04 ]; then FY=$((Y-1)); fi
+          node pipeline/fetch_chiba.mjs $FY all
+          node pipeline/snapshot_local.mjs export
+      - name: スナップショットをコミット
+        run: |
+          git config user.name "hojokin-dev"
+          git config user.email "hojokin-dev@users.noreply.github.com"
+          git add data/snapshots/
+          git diff --cached --quiet && echo "変更なし" && exit 0
+          git commit -m "自治体データ日次スナップショット更新"
+          git push

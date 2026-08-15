@@ -1,7 +1,7 @@
 # Netlify上でデータ取得→分類→静的生成まで実行する（hojokin-dbと同方式）。
 # 日次の再ビルドは GitHub Actions (.github/workflows/daily.yml) がBuild hookを叩く。
 [build]
-  command = "node pipeline/fetch_geps.mjs all && node pipeline/classify_rules.mjs && node pipeline/fetch_kkj.mjs 35 && node site/build.mjs"
+  command = "node pipeline/fetch_geps.mjs all && node pipeline/classify_rules.mjs && node pipeline/fetch_kkj.mjs 35 && node pipeline/snapshot_local.mjs import && node site/build.mjs"
   publish = "site/dist"
 
 [build.environment]
