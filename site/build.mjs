@@ -84,9 +84,9 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <header><div class="in"><a class="logo" href="/">${SITE}</a><a href="/alert/">無料の新着アラート</a></div></header>
 <main>${crumbHtml}
 ${body}
-<div class="cta"><b>あなたの会社が入れる案件だけ、毎朝届く。</b><br>
-業種と地域を登録すると、官公庁・自治体の新着入札案件を無料でお知らせします。<br><br>
-<a href="/alert/">無料アラートに登録する</a></div>
+<div class="cta"><b>あなたの業種の官公庁市場、10秒でわかります。</b><br>
+年間の発注件数・相場・公告シーズン・毎年出る定番案件を、実データから無料で診断。登録不要。<br><br>
+<a href="/shindan/">入札機会診断をやってみる</a></div>
 </main>
 <footer><div class="in">
 <p>${SITE} — 官公庁入札の落札相場・落札実績データベース。データ出典: 調達ポータル「落札実績オープンデータ」（政府標準利用規約準拠）ほか公的公表情報。最終更新: ${BUILT_AT}</p>
@@ -298,8 +298,9 @@ const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山�
 urls.push(page('/alert/', {
   title: `無料の入札新着アラート | ${SITE}`,
   desc: '業種と地域を登録するだけで、官公庁・自治体の新着入札案件を毎朝メールでお知らせします。無料。',
-  body: `<h1>入札の新着案件を、毎朝メールで</h1>
-<p>業種と地域を登録すると、条件に合う新着の入札案件を毎朝お届けします。登録は無料です。</p>
+  body: `<h1>あなた向けの入札機会レポートを、月1回無料で</h1>
+<p>業種と地域を登録すると、あなたの条件の新着案件・落札相場の動き・来期の公告予測をまとめた
+<b>月次レポート</b>を無料でお届けします。毎朝の自動配信（有料プラン・準備中）の先行案内もこちらから。</p>
 <form name="alert" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
 <input type="hidden" name="form-name" value="alert">
 <p style="display:none"><label>入力しないでください: <input name="bot-field"></label></p>
@@ -321,6 +322,43 @@ urls.push(page('/alert/thanks/', {
   noindex: true,
   body: `<h1>登録を受け付けました</h1>
 <p>配信の準備ができ次第、毎朝の新着案件メールをお届けします。それまでの間は<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
+}));
+
+// 入札機会診断（10秒診断の入札版。統計は事前計算、定番案件はカテゴリdata.jsonから動的算出）
+const shindanStats = TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).map((t) => {
+  const list = byCat.get(t.slug);
+  const y24 = list.filter((a) => a.award_date?.startsWith('2024')).length;
+  const y25 = list.filter((a) => a.award_date?.startsWith('2025')).length;
+  const amt25 = list.filter((a) => a.award_date?.startsWith('2025')).reduce((s, a) => s + (a.amount || 0), 0);
+  const amounts = list.map((a) => a.amount).filter((n) => n > 0);
+  const bandCounts = BANDS.map((b) => list.filter((a) => a.amount >= b.min && a.amount < b.max).length);
+  const minCount = new Map();
+  for (const a of list) minCount.set(a.ministry_code, (minCount.get(a.ministry_code) || 0) + 1);
+  return {
+    slug: t.slug, label: t.label, total: list.length,
+    perYear: Math.round((y24 + y25) / 2), amountYear: amt25,
+    median: median(amounts), band: BANDS[bandCounts.indexOf(Math.max(...bandCounts))].label,
+    months: monthCounts(list),
+    topMins: [...minCount.entries()].filter(([c]) => MINISTRIES[c]).sort((x, y) => y[1] - x[1]).slice(0, 5),
+  };
+});
+mkdirSync(join(DIST, 'shindan'), { recursive: true });
+writeFileSync(join(DIST, 'shindan', 'data.json'),
+  JSON.stringify({ mins: MINISTRIES, cats: shindanStats }));
+
+urls.push(page('/shindan/', {
+  title: `入札機会診断 — あなたの業種の官公庁市場が10秒でわかる | ${SITE}`,
+  desc: '業種を選ぶだけで、官公庁入札の年間発注件数・金額・発注機関・落札相場・公告シーズン・毎年出る定番案件がその場でわかる無料診断。登録不要。',
+  crumb: [['入札機会診断', '']],
+  body: `<h1>入札機会診断</h1>
+<p>業種を選ぶだけで、<b>あなたの市場の実データ</b>がその場で出ます。登録不要・無料。</p>
+<div class="tool">
+<select id="scat"><option value="">業種を選んでください</option>${shindanStats.map((s) => `<option value="${s.slug}">${s.label}</option>`).join('')}</select>
+<select id="spref"><option value="">全国（国の機関）</option>${PREFS.map((p) => `<option>${p}</option>`).join('')}</select>
+<span class="meta">地域は案件名からの推定（参考値）。自治体の入札データは順次追加予定です。</span>
+<div id="sout"></div>
+</div>
+<script defer src="/assets/shindan.js"></script>`,
 }));
 
 // about / policy
@@ -349,6 +387,7 @@ urls.push(page('/', {
   jsonld: { '@context': 'https://schema.org', '@type': 'WebSite', name: SITE, url: ORIGIN },
   body: `<h1>官公庁入札の落札相場・実績データベース</h1>
 ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録企業', companyCount.toLocaleString() + '社'], ['収録機関', organCount + '機関'], ['データ期間', '2013年度〜']])}
+<div class="cta"><b>まずは10秒診断から。</b>業種を選ぶだけで、年間発注件数・相場・公告シーズン・毎年出る定番案件がその場でわかります。<br><br><a href="/shindan/">入札機会診断をやってみる</a></div>
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
@@ -392,6 +431,70 @@ function run(){if(!D)return;
 }
 ['focus','input'].forEach(function(ev){q.addEventListener(ev,function(){load();deb()})});
 [fmin,fband].forEach(function(el){el.addEventListener('change',function(){load();run()})});
+})();
+`);
+
+// 入札機会診断エンジン
+writeFileSync(join(DIST, 'assets', 'shindan.js'), `// 入札機会診断（統計は/shindan/data.json、定番案件は各カテゴリのdata.jsonから算出）
+(function(){
+'use strict';
+var scat=document.getElementById('scat'),spref=document.getElementById('spref'),sout=document.getElementById('sout');
+if(!scat)return;
+var S=null,CATD={};
+function yen(n){if(n==null)return '—';if(n>=1e8)return (n/1e8).toFixed(n>=1e10?0:1)+'億円';if(n>=1e4)return Math.round(n/1e4).toLocaleString()+'万円';return n.toLocaleString()+'円'}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function norm(n){return n.replace(/令和\\d+年度?|平成\\d+年度?|Ｒ\\d+|R\\d+|[０-９0-9]+|（[^）]*）|\\([^)]*\\)|【[^】]*】|[　\\s]/g,'')}
+function teiban(rows){
+ var g={};
+ rows.forEach(function(r){var k=norm(r[0])+'|'+r[3];(g[k]=g[k]||[]).push(r)});
+ var out=[];
+ Object.keys(g).forEach(function(k){
+  var es=g[k],ys={};es.forEach(function(r){ys[r[1].slice(0,4)]=1});
+  if(Object.keys(ys).length>=3){
+   var ms={};es.forEach(function(r){var m=+r[1].slice(5,7);ms[m]=(ms[m]||0)+1});
+   var topM=+Object.keys(ms).sort(function(a,b){return ms[b]-ms[a]})[0];
+   var latest=es.sort(function(a,b){return b[1]<a[1]?-1:1})[0];
+   out.push({name:latest[0],min:latest[3],month:topM,amount:latest[2],years:Object.keys(ys).length})
+  }});
+ return out.sort(function(a,b){return b.years-a.years}).slice(0,3);
+}
+function render(){
+ if(!S)return;
+ var slug=scat.value,pref=spref.value;
+ if(!slug){sout.innerHTML='';return}
+ var c=S.cats.filter(function(x){return x.slug===slug})[0];
+ var peak=c.months.indexOf(Math.max.apply(null,c.months))+1;
+ var pubM=((peak+10-1)%12)+1; // 公告はおおむね落札の2ヶ月前
+ var html='<h2>あなたの市場: '+esc(c.label)+(pref?' × '+esc(pref)+'（参考）':'（国の機関・全国）')+'</h2>'
+  +'<div class="stats">'
+  +'<div class="stat"><b>年間 約'+c.perYear.toLocaleString()+'件</b>発注件数（直近2年平均）</div>'
+  +'<div class="stat"><b>'+yen(c.amountYear)+'</b>年間発注総額（2025年）</div>'
+  +'<div class="stat"><b>'+esc(c.band)+'</b>最多の金額帯</div>'
+  +'<div class="stat"><b>'+peak+'月</b>落札の集中月（公告は'+pubM+'月頃〜）</div></div>'
+  +'<h3>発注が多い機関</h3><ul>'+c.topMins.map(function(m){return '<li><a href="/organ/'+m[0].toLowerCase()+'/">'+esc(S.mins[m[0]]||m[0])+'</a>（'+m[1].toLocaleString()+'件）</li>'}).join('')+'</ul>'
+  +'<div id="steiban"><p class="meta">定番案件を分析中…</p></div>'
+  +'<div class="cta"><b>この条件の新着案件を、毎朝自動で受け取りませんか?</b><br>'
+  +'いま準備中の有料プラン（月9,800円）では、あなたの条件に合う新着案件を毎朝、類似案件の落札相場つきでお届けします。<br><br>'
+  +'<a href="/alert/">無料の月次レポートに登録して先行案内を受け取る</a></div>';
+ sout.innerHTML=html;
+ var render_id=slug+'|'+pref;sout.dataset.rid=render_id;
+ (CATD[slug]?Promise.resolve(CATD[slug]):fetch('/price/'+slug+'/data.json').then(function(r){return r.json()}).then(function(j){CATD[slug]=j;return j}))
+ .then(function(j){
+  if(sout.dataset.rid!==render_id)return;
+  var rows=j.rows;
+  var el=document.getElementById('steiban');if(!el)return;
+  var prefNote='';
+  if(pref){var pk=pref.replace(/[都府県]$/,'');var pr=rows.filter(function(r){return r[0].indexOf(pk)>=0});
+   prefNote='<p>案件名に「'+esc(pk)+'」を含む事例: <b>'+pr.length.toLocaleString()+'件</b>'+(pr.length?'（<a href="/price/'+slug+'/">検索ツールで「'+esc(pk)+'」と入れると一覧できます</a>）':'')+'</p>';
+   if(pr.length>=30)rows=pr}
+  var tb=teiban(rows);
+  el.innerHTML=prefNote+(tb.length?'<h3>毎年出ている定番案件（例）</h3><div class="wrap"><table><tr><th>案件</th><th>機関</th><th>例年の時期</th><th>直近の落札額</th></tr>'
+   +tb.map(function(t){return '<tr><td>'+esc(t.name)+'</td><td>'+esc(S.mins[t.min]||t.min)+'</td><td>'+t.month+'月頃</td><td style="text-align:right">'+yen(t.amount)+'</td></tr>'}).join('')
+   +'</table></div><p class="meta">同名系の案件が3年以上繰り返し落札されているもの。来期も同時期に公告される可能性が高い「先回り」の入口です。</p>':'')
+ });
+}
+fetch('/shindan/data.json').then(function(r){return r.json()}).then(function(j){S=j;render()});
+scat.addEventListener('change',render);spref.addEventListener('change',render);
 })();
 `);
 
