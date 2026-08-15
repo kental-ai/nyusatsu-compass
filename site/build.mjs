@@ -67,30 +67,71 @@ const monthMode = (list) => {
   return Number(Object.keys(m).sort((x, y) => m[y] - m[x])[0] || 0);
 };
 
-// ---------- レイアウト ----------
+// ---------- レイアウト（航海図ポップ: ネイビー×クリーム×コーラル + Zen Maru Gothic） ----------
 const CSS = `
-:root{--ink:#1a2333;--sub:#5a6472;--line:#dde3ea;--acc:#0f6ab2;--bg:#f7f9fb}
-*{box-sizing:border-box}body{margin:0;font-family:"Hiragino Sans","Yu Gothic",Meiryo,sans-serif;color:var(--ink);background:#fff;line-height:1.7}
-main{max-width:960px;margin:0 auto;padding:16px}h1{font-size:1.5rem;line-height:1.4}h2{font-size:1.15rem;border-left:4px solid var(--acc);padding-left:10px;margin-top:2em}
-table{border-collapse:collapse;width:100%;font-size:.92rem}th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}th{background:var(--bg)}td.num{text-align:right;white-space:nowrap}
-.wrap{overflow-x:auto}a{color:var(--acc)}.crumb{font-size:.85rem;color:var(--sub);margin:8px 0}.crumb a{color:var(--sub)}
-header{border-bottom:1px solid var(--line)}header .in{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
-header .logo{font-weight:700;font-size:1.1rem;color:var(--ink);text-decoration:none}
-.cta{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;margin:24px 0}
-.cta a{display:inline-block;background:var(--acc);color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:700}
-.meta{color:var(--sub);font-size:.85rem}footer{border-top:1px solid var(--line);margin-top:48px;padding:24px 16px;font-size:.82rem;color:var(--sub)}
-footer .in{max-width:960px;margin:0 auto}.stats{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
-.stat{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 16px}.stat b{display:block;font-size:1.3rem}
-.insight{background:#eef5fb;border-left:4px solid var(--acc);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+:root{--navy:#16324F;--cream:#FDF6EC;--coral:#E8604C;--brass:#F4B942;--shallow:#EAF2F8;
+--ink:#1D3149;--sub:#4A5A6E;--line:#E4DACA;--bg:#FBF5EA;--acc:#16324F}
+*{box-sizing:border-box}
+body{margin:0;font-family:'M PLUS Rounded 1c','Hiragino Maru Gothic ProN','Hiragino Sans',Meiryo,sans-serif;color:var(--ink);background:#FFFDF8;line-height:1.75}
+h1,h2,h3,.mk{font-family:'Zen Maru Gothic','M PLUS Rounded 1c',sans-serif}
+main{max-width:960px;margin:0 auto;padding:16px}
+h1{font-size:1.55rem;line-height:1.45;color:var(--navy)}
+h2{font-size:1.15rem;color:var(--navy);border-left:5px solid var(--coral);padding-left:10px;margin-top:2.2em;border-radius:0}
+h3{font-size:1rem;color:var(--navy)}
+table{border-collapse:collapse;width:100%;font-size:.92rem;background:#fff}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+th{background:var(--shallow);color:var(--navy)}td.num{text-align:right;white-space:nowrap}
+.wrap{overflow-x:auto}a{color:#155A8A}
+.crumb{font-size:.85rem;color:var(--sub);margin:8px 0}.crumb a{color:var(--sub)}
+header{background:var(--navy)}
+header .in{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+header .logo{font-family:'Zen Maru Gothic',sans-serif;font-weight:700;font-size:1.15rem;color:var(--cream);text-decoration:none;display:flex;align-items:center;gap:9px}
+header .hcta{background:var(--coral);color:#fff;text-decoration:none;font-weight:700;font-size:.85rem;padding:8px 16px;border-radius:999px;white-space:nowrap}
+.cta{background:var(--cream);border:2px solid var(--navy);border-radius:16px;padding:18px;margin:28px 0;display:flex;gap:14px;align-items:flex-start}
+.cta .ctxt{flex:1}
+.cta a.btn{display:inline-block;background:var(--coral);color:#fff;padding:11px 26px;border-radius:999px;text-decoration:none;font-weight:700;font-family:'Zen Maru Gothic',sans-serif}
+.meta{color:var(--sub);font-size:.85rem}
+footer{background:var(--navy);color:#C9D6E4;margin-top:56px;padding:28px 16px;font-size:.82rem}
+footer .in{max-width:960px;margin:0 auto}footer a{color:var(--cream)}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.stat{background:#fff;border:2px solid var(--navy);border-radius:12px;padding:10px 16px;color:var(--navy)}
+.stat b{display:block;font-size:1.35rem;font-family:'Zen Maru Gothic',sans-serif}
+.kun-row{display:flex;gap:12px;align-items:flex-start;margin:18px 0}
+.kun-row svg{flex-shrink:0}
+.kun-bubble{background:var(--shallow);border-radius:2px 16px 16px 16px;padding:12px 16px;flex:1;color:var(--navy)}
+.kun-bubble b{color:var(--coral)}
 .chart{margin:16px 0;max-width:640px}.bars{display:flex;align-items:flex-end;gap:3px;height:110px}
-.bars>div{flex:1;background:var(--acc);border-radius:3px 3px 0 0;position:relative}
+.bars>div{flex:1;background:var(--navy);border-radius:4px 4px 0 0;position:relative}
 .bars .blab{position:absolute;top:-1.4em;left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--sub);white-space:nowrap}
 .xlab{display:flex;gap:3px;margin-top:4px}.xlab>span{flex:1;text-align:center;font-size:.75rem;color:var(--sub)}
-.tool{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px;margin:16px 0}
-.tool input[type=search]{width:100%;max-width:420px;padding:10px;border:1px solid var(--line);border-radius:6px;font-size:1rem}
-.tool select{padding:9px;border:1px solid var(--line);border-radius:6px;margin:8px 8px 0 0}
-.tool .tstats{margin:12px 0;font-size:.95rem}.tool .tstats b{font-size:1.15rem;color:var(--acc)}
+.tool{background:var(--cream);border:2px dashed #D8CDBC;border-radius:16px;padding:16px;margin:16px 0}
+.tool input[type=search]{width:100%;max-width:420px;padding:10px 14px;border:2px solid var(--navy);border-radius:12px;font-size:1rem;background:#fff;font-family:inherit}
+.tool select{padding:9px 12px;border:2px solid var(--navy);border-radius:12px;margin:8px 8px 0 0;background:#fff;color:var(--navy);font-family:inherit}
+.tool .tstats{margin:12px 0;font-size:.95rem}.tool .tstats b{font-size:1.15rem;color:var(--coral)}
+button,.btn{font-family:'Zen Maru Gothic',sans-serif}
+input[type=email],textarea{border:2px solid var(--navy);border-radius:12px;font-family:inherit}
+form button{background:var(--coral);color:#fff;border:0;padding:11px 28px;border-radius:999px;font-weight:700;font-size:1rem;cursor:pointer}
+mark{background:linear-gradient(transparent 62%,var(--brass) 62%);color:inherit}
 `;
+
+// コンパスくん（v2: 顔とおなかの文字盤を分離、赤針のアホ毛は常に北東を指す）
+function kun(size, expr = 'normal') {
+  const eyes = expr === 'idea'
+    ? `<path d="M 36 70 Q 42 64 48 70" fill="none" stroke="#16324F" stroke-width="4" stroke-linecap="round"/><path d="M 72 70 Q 78 64 84 70" fill="none" stroke="#16324F" stroke-width="4" stroke-linecap="round"/><ellipse cx="60" cy="88" rx="7" ry="9" fill="#16324F"/><ellipse cx="60" cy="91" rx="4" ry="5" fill="#E8604C"/>`
+    : expr === 'salute'
+      ? `<path d="M 36 74 L 48 70" stroke="#16324F" stroke-width="4" stroke-linecap="round"/><circle cx="78" cy="72" r="5.5" fill="#16324F"/><circle cx="80" cy="70" r="1.8" fill="#fff"/><path d="M 50 86 Q 60 93 70 86" fill="none" stroke="#16324F" stroke-width="4" stroke-linecap="round"/><path d="M 14 60 Q 24 50 34 58" fill="none" stroke="#16324F" stroke-width="5" stroke-linecap="round"/>`
+      : `<circle cx="42" cy="72" r="5.5" fill="#16324F"/><circle cx="78" cy="72" r="5.5" fill="#16324F"/><circle cx="44" cy="70" r="1.8" fill="#fff"/><circle cx="80" cy="70" r="1.8" fill="#fff"/><path d="M 50 84 Q 60 92 70 84" fill="none" stroke="#16324F" stroke-width="4" stroke-linecap="round"/>`;
+  const spark = expr === 'idea' ? `<g stroke="#F4B942" stroke-width="3" stroke-linecap="round"><line x1="88" y1="20" x2="94" y2="12"/><line x1="96" y1="30" x2="104" y2="26"/><line x1="80" y1="12" x2="82" y2="4"/></g>` : '';
+  const dial = size >= 30
+    ? `<circle cx="60" cy="112" r="14" fill="#FDF6EC" stroke="#16324F" stroke-width="3"/><g stroke="#16324F" stroke-width="2" stroke-linecap="round"><line x1="60" y1="100" x2="60" y2="103"/><line x1="48" y1="112" x2="51" y2="112"/><line x1="69" y1="112" x2="72" y2="112"/></g><g transform="rotate(-40 60 112)"><line x1="60" y1="104" x2="60" y2="112" stroke="#E8604C" stroke-width="3" stroke-linecap="round"/><line x1="60" y1="112" x2="60" y2="119" stroke="#16324F" stroke-width="3" stroke-linecap="round"/></g>`
+    : '';
+  const cheeks = expr === 'salute'
+    ? `<circle cx="88" cy="82" r="4.5" fill="#F0999B"/>`
+    : `<circle cx="32" cy="82" r="4.5" fill="#F0999B"/><circle cx="88" cy="82" r="4.5" fill="#F0999B"/>`;
+  return `<svg width="${size}" height="${Math.round(size * 140 / 120)}" viewBox="0 0 120 140" aria-hidden="true"><g transform="rotate(-40 60 26)"><polygon points="60,2 66,26 54,26" fill="#E8604C"/><polygon points="60,50 66,26 54,26" fill="#16324F"/><circle cx="60" cy="26" r="4" fill="#F4B942" stroke="#16324F" stroke-width="2"/></g>${spark}<circle cx="60" cy="82" r="52" fill="#FFFFFF" stroke="#16324F" stroke-width="5"/>${eyes}${cheeks}${dial}</svg>`;
+}
+const kunSays = (html, expr = 'idea') => html
+  ? `<div class="kun-row">${kun(46, expr)}<div class="kun-bubble">${html}</div></div>` : '';
 
 function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = null, lastmod = null }) {
   const canonical = ORIGIN + path;
@@ -119,14 +160,17 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta property="og:url" content="${canonical}">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=M+PLUS+Rounded+1c:wght@400;700&display=swap" rel="stylesheet">
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 </head><body>
-<header><div class="in"><a class="logo" href="/">${SITE}</a><a href="/alert/">無料の新着アラート</a></div></header>
+<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/shindan/">10秒診断をやってみる</a></div></header>
 <main>${crumbHtml}
 ${body}
-<div class="cta"><b>あなたの業種の官公庁市場、10秒でわかります。</b><br>
+<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">あなたの業種の官公庁市場、10秒でわかるよ!</b><br>
 年間の発注件数・相場・公告シーズン・毎年出る定番案件を、実データから無料で診断。登録不要。<br><br>
-<a href="/shindan/">入札機会診断をやってみる</a></div>
+<a class="btn" href="/shindan/">入札機会診断をやってみる</a></div></div>
 </main>
 <footer><div class="in">
 <p>${SITE} — 官公庁入札の落札相場・落札実績データベース。データ出典: 調達ポータル「落札実績オープンデータ」（政府標準利用規約準拠）ほか公的公表情報。最終更新: ${BUILT_AT}</p>
@@ -190,7 +234,7 @@ function insights(list, subject) {
     s.push(y25 > y24 ? `件数は<b>増加傾向</b>（2024年${y24.toLocaleString()}件 → 2025年${y25.toLocaleString()}件）。` :
       `件数は<b>減少傾向</b>（2024年${y24.toLocaleString()}件 → 2025年${y25.toLocaleString()}件）。`);
   }
-  return `<p class="insight">${s.join(' ')}</p>`;
+  return s.join(' ');
 }
 
 function monthChart(list, caption) {
@@ -263,7 +307,7 @@ for (const t of TAXONOMY) {
     jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${t.label}の落札実績データ`, description: `国の機関の${t.label}に関する落札実績${list.length}件の統計`, license: 'https://www.digital.go.jp/copyright-policy/', creator: { '@type': 'Organization', name: SITE } },
     body: `<h1>${t.label}の入札はいくらで落ちる?</h1>
 <p class="meta">調達ポータル公表の落札実績（2013年度〜）のうち「${t.label}」${list.length.toLocaleString()}件のデータ。毎日更新。</p>
-${insights(list, `${t.label}`)}
+${kunSays(insights(list, `${t.label}`))}
 <h2>あなたの案件に近い落札事例を探す</h2>
 <div class="tool">
 <p>案件名のキーワードで過去の落札事例を絞り込むと、<b>その条件での落札額の水準</b>がわかります。<span class="meta">（例: 庁舎 定期、機械警備、データ入力）</span></p>
@@ -440,7 +484,7 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
     jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` }, faqLd],
     body: `<h1>${esc(name)}の落札実績</h1>
 <p class="meta">法人番号 ${corpNo}。調達ポータル公表の落札実績オープンデータに基づく。</p>
-<p class="insight">${esc(summary)}${histories.length ? ` 複数年にわたり繰り返し発注されている継続契約${histories.length}件に関与しています（下記に履歴と次回公告の目安）。` : ''}</p>
+${kunSays(esc(summary) + (histories.length ? ` 複数年くり返し発注されている継続契約${histories.length}件に関わっているよ（下に履歴と次回公告の目安があるよ）。` : ''), 'normal')}
 ${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', yen(total)], ['直近の落札', list[0].award_date]])}
 ${analysisHtml}
 ${histHtml ? `<h2>継続契約の落札履歴と次回予測</h2>
@@ -486,7 +530,7 @@ for (const [code, list] of byMinistry) {
     lastmod: list[0]?.award_date,
     body: `<h1>${esc(name)}の落札結果</h1>
 ${statBoxes([['実績件数', list.length.toLocaleString() + '件'], ['落札総額', yen(list.reduce((s, a) => s + (a.amount || 0), 0))]])}
-${insights(list, name)}
+${kunSays(insights(list, name))}
 <h2>発注時期のパターン</h2>${monthChart(list, name)}
 <h2>発注の多い業務</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
 <h2>落札の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
@@ -529,7 +573,7 @@ page('/alert/thanks/', {
   title: `登録ありがとうございます | ${SITE}`,
   desc: '入札新着アラートの登録を受け付けました。',
   noindex: true,
-  body: `<h1>送信を受け付けました</h1>
+  body: `<div style="text-align:center;margin:24px 0">${kun(90, 'salute')}</div><h1 style="text-align:center">送信を受け付けました!</h1>
 <p>レポート登録の方は、配信の準備ができ次第メールでお届けします。お問い合わせの方は、確認のうえご連絡します。</p>
 <p>それまでの間は<a href="/shindan/">入札機会診断</a>や<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
 });
@@ -581,8 +625,7 @@ page('/alert/thanks/', {
       crumb: [['週間レポート', '/weekly/'], [label, '']],
       lastmod: e,
       body: `<h1>官公庁入札 週間レポート（${label}）</h1>
-<p class="insight">この週の国の機関の落札は<b>${list.length.toLocaleString()}件・総額${yen(total)}</b>。
-契約の業者交代（リプレイス）を<b>${repl.length}件</b>検出${debut.length ? `、初めて落札した新規参入企業は<b>${debut.length}社</b>` : ''}。</p>
+${kunSays(`この週の国の機関の落札は<b>${list.length.toLocaleString()}件・総額${yen(total)}</b>! 契約の業者交代（リプレイス）を<b>${repl.length}件</b>見つけたよ${debut.length ? `。初めて落札した新規参入は<b>${debut.length}社</b>` : ''}。`)}
 <h2>今週の大型案件</h2>${awardRows(big)}
 ${repl.length ? `<h2>契約リプレイス（業者交代が起きた契約）</h2>
 <p class="meta">前回と落札者が変わった契約。競争が動いた場所であり、次回の狙い目でもあります。</p>
@@ -629,8 +672,8 @@ page('/shindan/', {
   title: `入札機会診断 — あなたの業種の官公庁市場が10秒でわかる | ${SITE}`,
   desc: '業種を選ぶだけで、官公庁入札の年間発注件数・金額・発注機関・落札相場・公告シーズン・毎年出る定番案件がその場でわかる無料診断。登録不要。',
   crumb: [['入札機会診断', '']],
-  body: `<h1>入札機会診断</h1>
-<p>業種を選ぶだけで、<b>あなたの市場の実データ</b>がその場で出ます。登録不要・無料。</p>
+  body: `<div style="display:flex;align-items:center;gap:14px">${kun(72, 'idea')}<div><h1 style="margin:0">入札機会診断</h1>
+<p style="margin:4px 0 0">業種を選ぶだけで、<b>あなたの市場の実データ</b>がその場で出るよ。登録不要・無料!</p></div></div>
 <div class="tool">
 <select id="scat"><option value="">業種を選んでください</option>${shindanStats.map((s) => `<option value="${s.slug}">${s.label}</option>`).join('')}</select>
 <select id="spref"><option value="">全国（国の機関）</option>${PREFS.map((p) => `<option>${p}</option>`).join('')}</select>
