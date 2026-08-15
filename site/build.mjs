@@ -92,7 +92,7 @@ footer .in{max-width:960px;margin:0 auto}.stats{display:flex;gap:12px;flex-wrap:
 .tool .tstats{margin:12px 0;font-size:.95rem}.tool .tstats b{font-size:1.15rem;color:var(--acc)}
 `;
 
-function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = null }) {
+function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = null, lastmod = null }) {
   const canonical = ORIGIN + path;
   const crumbHtml = crumb.length
     ? `<nav class="crumb">${[['トップ', '/'], ...crumb].map(([t, h], i, arr) =>
@@ -129,7 +129,7 @@ ${body}
   const file = join(DIST, path.replace(/\/$/, '/index.html').replace(/^\//, ''));
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, html);
-  if (!noindex) urls.push(canonical); // noindexページはsitemapに載せない
+  if (!noindex) urls.push({ loc: canonical, lastmod }); // noindexページはsitemapに載せない。lastmodは実データの動いた日
   return canonical;
 }
 
@@ -252,6 +252,7 @@ for (const t of TAXONOMY) {
     title: `${t.label}の入札はいくらで落ちる? 落札相場と${list.length.toLocaleString()}件の実績検索 | ${SITE}`,
     desc: `官公庁の「${t.label}」入札の落札相場。過去${list.length.toLocaleString()}件からあなたの案件に近い落札事例を検索し、金額帯・発注時期・落札企業の実データで「いくらで入れるか」の判断材料を提供。`,
     crumb: [['落札相場', '/price/'], [t.label, '']],
+    lastmod: list[0]?.award_date,
     jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${t.label}の落札実績データ`, description: `国の機関の${t.label}に関する落札実績${list.length}件の統計`, license: 'https://www.digital.go.jp/copyright-policy/', creator: { '@type': 'Organization', name: SITE } },
     body: `<h1>${t.label}の入札はいくらで落ちる?</h1>
 <p class="meta">調達ポータル公表の落札実績（2013年度〜）のうち「${t.label}」${list.length.toLocaleString()}件のデータ。毎日更新。</p>
@@ -421,6 +422,7 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
     title: `${name}の落札実績【${list.length.toLocaleString()}件】入札・落札情報 | ${SITE}`,
     desc: `${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
+    lastmod: list[0]?.award_date,
     jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` }, faqLd],
     body: `<h1>${esc(name)}の落札実績</h1>
 <p class="meta">法人番号 ${corpNo}。調達ポータル公表の落札実績オープンデータに基づく。</p>
@@ -467,6 +469,7 @@ for (const [code, list] of byMinistry) {
     title: `${name}の入札 落札結果・落札企業【${list.length.toLocaleString()}件】 | ${SITE}`,
     desc: `${name}の入札・落札結果アーカイブ。落札実績${list.length.toLocaleString()}件から、よく発注される業務・落札の多い企業・直近の落札事例を公開。`,
     crumb: [['発注機関', '/organ/'], [name, '']],
+    lastmod: list[0]?.award_date,
     body: `<h1>${esc(name)}の落札結果</h1>
 ${statBoxes([['実績件数', list.length.toLocaleString() + '件'], ['落札総額', yen(list.reduce((s, a) => s + (a.amount || 0), 0))]])}
 ${insights(list, name)}
@@ -516,6 +519,75 @@ page('/alert/thanks/', {
 <p>レポート登録の方は、配信の準備ができ次第メールでお届けします。お問い合わせの方は、確認のうえご連絡します。</p>
 <p>それまでの間は<a href="/shindan/">入札機会診断</a>や<a href="/price/">落札相場データ</a>をご活用ください。</p>`,
 });
+
+// 週間レポート（毎週自動で新ページが増える鮮度資産。過去26週分を遡って生成）
+{
+  const companyFirst = new Map(); // corpNo → 初落札日
+  for (let i = AWARDS.length - 1; i >= 0; i--) { // AWARDSは日付降順なので逆走査で最古から
+    const a = AWARDS[i];
+    if (a.corporate_no && !companyFirst.has(a.corporate_no)) companyFirst.set(a.corporate_no, a.award_date);
+  }
+  const fmtMD = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  const today = new Date(BUILT_AT + 'T00:00:00Z');
+  const dow = (today.getUTCDay() + 6) % 7; // 月曜=0
+  let monday = new Date(today.getTime() - (dow + 7) * 86400000); // 直近の完了した週の月曜
+  const weekly = [];
+  for (let w = 0; w < 26; w++) {
+    const start = new Date(monday.getTime() - w * 7 * 86400000);
+    const end = new Date(start.getTime() + 6 * 86400000);
+    const s = start.toISOString().slice(0, 10), e = end.toISOString().slice(0, 10);
+    const list = AWARDS.filter((a) => a.award_date >= s && a.award_date <= e);
+    if (list.length < 50) continue;
+    const slug = s.replaceAll('-', '');
+    const total = list.reduce((x, a) => x + (a.amount || 0), 0);
+    // 大型案件トップ10
+    const big = [...list].sort((x, y) => (y.amount || 0) - (x.amount || 0)).slice(0, 10);
+    // 契約リプレイス: 同一契約クラスタで直前回と落札者が変わった事例
+    const repl = [];
+    for (const a of list) {
+      if (!a.corporate_no) continue;
+      const cl = clusters.get(clusterKey(a));
+      if (!cl || cl.length < 2) continue;
+      const prev = cl.filter((x) => x.award_date < a.award_date && x.corporate_no)
+        .sort((x, y) => (x.award_date < y.award_date ? 1 : -1))[0];
+      if (prev && prev.corporate_no !== a.corporate_no &&
+          (new Date(a.award_date) - new Date(prev.award_date)) / 86400000 <= 550) {
+        repl.push({ a, prev });
+        if (repl.length >= 10) break;
+      }
+    }
+    // 新規参入: この週に初落札した企業
+    const debut = [...new Set(list.map((a) => a.corporate_no).filter(Boolean))]
+      .filter((no) => companyFirst.get(no) >= s && companyFirst.get(no) <= e).slice(0, 10);
+    const label = `${Number(s.slice(0, 4))}年${fmtMD(s)}〜${fmtMD(e)}`;
+    weekly.push({ slug, s, e, label, count: list.length, total });
+    page(`/weekly/${slug}/`, {
+      title: `官公庁入札 週間レポート ${label} — 落札${list.length.toLocaleString()}件・リプレイス${repl.length}件 | ${SITE}`,
+      desc: `${label}の官公庁落札動向。落札${list.length.toLocaleString()}件・総額${yen(total)}。大型案件、契約が業者交代したリプレイス事例${repl.length}件、新規参入${debut.length}社をデータで解説。`,
+      crumb: [['週間レポート', '/weekly/'], [label, '']],
+      lastmod: e,
+      body: `<h1>官公庁入札 週間レポート（${label}）</h1>
+<p class="insight">この週の国の機関の落札は<b>${list.length.toLocaleString()}件・総額${yen(total)}</b>。
+契約の業者交代（リプレイス）を<b>${repl.length}件</b>検出${debut.length ? `、初めて落札した新規参入企業は<b>${debut.length}社</b>` : ''}。</p>
+<h2>今週の大型案件</h2>${awardRows(big)}
+${repl.length ? `<h2>契約リプレイス（業者交代が起きた契約）</h2>
+<p class="meta">前回と落札者が変わった契約。競争が動いた場所であり、次回の狙い目でもあります。</p>
+<div class="wrap"><table><tr><th>案件</th><th>新しい落札者</th><th>今回</th><th>前回の落札者</th><th>前回</th></tr>
+${repl.map(({ a, prev }) => `<tr><td>${esc(a.name)}</td><td><a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a></td><td class="num">${yen(a.amount)}</td><td><a href="/company/${prev.corporate_no}/">${esc(prev.winner_name)}</a></td><td class="num">${yen(prev.amount)}</td></tr>`).join('\n')}</table></div>` : ''}
+${debut.length ? `<h2>新規参入（この週に初落札）</h2>
+<ul>${debut.map((no) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a></li>`).join('')}</ul>` : ''}
+<h2>分野別の落札件数</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`, 8)}`,
+    });
+  }
+  page('/weekly/', {
+    title: `官公庁入札 週間レポート一覧 | ${SITE}`,
+    desc: '毎週の官公庁落札動向を自動集計。大型案件・契約リプレイス・新規参入企業のデータレポート。',
+    crumb: [['週間レポート', '']],
+    lastmod: weekly[0]?.e,
+    body: `<h1>週間レポート</h1><p>毎週の落札動向・契約リプレイス・新規参入を自動集計しています。</p>
+<ul>${weekly.map((w) => `<li><a href="/weekly/${w.slug}/">${w.label}</a> — 落札${w.count.toLocaleString()}件・${yen(w.total)}</li>`).join('')}</ul>`,
+  });
+}
 
 // 入札機会診断（10秒診断の入札版。統計は事前計算、定番案件はカテゴリdata.jsonから動的算出）
 const shindanStats = TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).map((t) => {
@@ -610,7 +682,7 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
-<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a></p>`,
+<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a> ／ <a href="/weekly/">→ 週間レポート</a></p>`,
 });
 
 // 類似案件検索エンジン（全相場ページ共通・キャッシュされる）
@@ -730,7 +802,7 @@ writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}
 const shards = [];
 for (let i = 0; i < urls.length; i += 10000) shards.push(urls.slice(i, i + 10000));
 shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
-  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${s.map((u) => `<url><loc>${u}</loc></url>`).join('\n')}\n</urlset>`));
+  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${s.map((u) => `<url><loc>${u.loc}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>`));
 writeFileSync(join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shards.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
 

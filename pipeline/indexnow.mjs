@@ -14,19 +14,33 @@ const ORIGIN = 'https://nyusatsu-compass.com';
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'site', 'dist');
 const FULL = process.argv.includes('--full');
 
-let urls = [];
-if (FULL) {
-  for (let i = 0; existsSync(join(DIST, `sitemap-${i}.xml`)); i++) {
-    const locs = (readFileSync(join(DIST, `sitemap-${i}.xml`), 'utf8').match(/<loc>([^<]+)<\/loc>/g) || [])
-      .map((m) => m.slice(5, -6));
-    urls.push(...locs);
+const REMOTE = process.argv.includes('--remote'); // distが無い環境（CI等）では本番sitemapを読む
+async function readSitemapLocs() {
+  const out = [];
+  if (REMOTE) {
+    const idx = await (await fetch(`${ORIGIN}/sitemap.xml`)).text();
+    for (const m of idx.matchAll(/<loc>([^<]+)<\/loc>/g)) {
+      const body = await (await fetch(m[1])).text();
+      out.push(...[...body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((x) => x[1]));
+    }
+  } else {
+    for (let i = 0; existsSync(join(DIST, `sitemap-${i}.xml`)); i++) {
+      const locs = (readFileSync(join(DIST, `sitemap-${i}.xml`), 'utf8').match(/<loc>([^<]+)<\/loc>/g) || [])
+        .map((m) => m.slice(5, -6));
+      out.push(...locs);
+    }
   }
+  return out;
+}
+
+let urls = [];
+const allLocs = await readSitemapLocs();
+if (FULL) {
+  urls = allLocs;
 } else {
-  // 日次: 統計が動く中核ページのみ
-  urls.push(`${ORIGIN}/`, `${ORIGIN}/price/`, `${ORIGIN}/organ/`, `${ORIGIN}/company/`);
-  const locs = (readFileSync(join(DIST, 'sitemap-0.xml'), 'utf8').match(/<loc>([^<]+)<\/loc>/g) || [])
-    .map((m) => m.slice(5, -6));
-  urls.push(...locs.filter((u) => u.includes('/price/') || u.includes('/organ/')));
+  // 週次/日次: 統計が動く中核ページ+週報のみ
+  urls.push(`${ORIGIN}/`, `${ORIGIN}/price/`, `${ORIGIN}/organ/`, `${ORIGIN}/company/`, `${ORIGIN}/weekly/`);
+  urls.push(...allLocs.filter((u) => u.includes('/price/') || u.includes('/organ/') || u.includes('/weekly/')));
 }
 urls = [...new Set(urls)];
 

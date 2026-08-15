@@ -1,0 +1,22 @@
+# 週次セルフ監査: サイト健全性・sitemap整合・データソース生存の自動チェック。
+# 失敗するとGitHubからワークフロー失敗通知が飛ぶ（それがアラート）。
+name: weekly-audit
+on:
+  schedule:
+    - cron: '30 22 * * 0'   # 毎週月曜 7:30 JST（日次ビルド6:00の後）
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: サイト・データソース監査
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'   # KKJの中間証明書不備への暫定対応（読み取りのみ）
+        run: node tools/audit.mjs
+      - name: IndexNow週次通知（中核+週報ページ）
+        if: success()
+        run: node pipeline/indexnow.mjs --remote || true
