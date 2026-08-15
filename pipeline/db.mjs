@@ -43,6 +43,27 @@ export function openDb() {
       kind          TEXT                            -- ministry / agency / pref / city
     );
 
+    CREATE TABLE IF NOT EXISTS notices (            -- 公告（KKJ検索API。落札=過去に対する未来側）
+      key           TEXT PRIMARY KEY,               -- KKJのKey（一意）
+      name          TEXT NOT NULL,                  -- 件名
+      org           TEXT,                           -- 機関名
+      pref          TEXT,                           -- 都道府県名
+      lg_code       TEXT,                           -- 都道府県コード
+      city          TEXT,                           -- 市区町村名
+      issue_date    TEXT,                           -- 公告日 (YYYY-MM-DD)
+      deadline      TEXT,                           -- 入札開始日
+      opening       TEXT,                           -- 開札日
+      category      TEXT,                           -- 物品/工事/役務
+      procedure     TEXT,                           -- 公示種別
+      cert          TEXT,                           -- 参加資格 (A B等)
+      url           TEXT,                           -- 公告原文URL
+      description   TEXT,                           -- 公告文（先頭4,000字）
+      slug          TEXT,                           -- 業務分類（taxonomy）
+      fetched_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_notices_issue ON notices (issue_date);
+    CREATE INDEX IF NOT EXISTS idx_notices_slug ON notices (slug);
+
     CREATE TABLE IF NOT EXISTS fetch_log (          -- 取得履歴（差分運用と失敗検知）
       source        TEXT NOT NULL,
       key           TEXT NOT NULL,                  -- ファイル名や日付

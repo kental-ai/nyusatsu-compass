@@ -32,6 +32,14 @@ const AWARDS = db.prepare(`
   FROM awards a LEFT JOIN enrich_class c ON a.rowid = c.award_rowid
   ORDER BY a.award_date DESC`).all();
 const COMPANIES = db.prepare(`SELECT corporate_no, name FROM companies`).all();
+let NOTICES = [];
+try {
+  NOTICES = db.prepare(`SELECT key, name, org, pref, issue_date, deadline, category, url, slug FROM notices`).all();
+} catch { /* notices未取得のローカル環境でもビルド可能にする */ }
+const TODAY = new Date().toISOString().slice(0, 10);
+const OPEN_NOTICES = NOTICES.filter((x) =>
+  (x.deadline && x.deadline >= TODAY) ||
+  (x.issue_date && (new Date(TODAY) - new Date(x.issue_date)) / 86400000 <= 21));
 const BUILT_AT = new Date().toISOString().slice(0, 10);
 const LABEL = Object.fromEntries(TAXONOMY.map((t) => [t.slug, t.label]));
 
@@ -554,6 +562,7 @@ page('/alert/', {
   body: `<h1>あなた向けの入札機会レポートを、月1回無料で</h1>
 <p>業種と地域を登録すると、あなたの条件の新着案件・落札相場の動き・来期の公告予測をまとめた
 <b>月次レポート</b>を無料でお届けします。毎朝の自動配信（有料プラン・準備中）の先行案内もこちらから。</p>
+${OPEN_NOTICES.length ? `<p class="meta">いま全国で公告中の案件: <b>${OPEN_NOTICES.length.toLocaleString()}件</b>（官公需情報ポータル連携・毎日更新）</p>` : ''}
 <form name="alert" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
 <input type="hidden" name="form-name" value="alert">
 <p style="display:none"><label>入力しないでください: <input name="bot-field"></label></p>
@@ -664,9 +673,20 @@ const shindanStats = TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= 
     topMins: [...minCount.entries()].filter(([c]) => MINISTRIES[c]).sort((x, y) => y[1] - x[1]).slice(0, 5),
   };
 });
+// 開いている公告（KKJ）を診断に接続: 分類×都道府県の件数と直近サンプル
+const openBySlug = {};
+for (const nt of OPEN_NOTICES) {
+  const s = nt.slug || 'other';
+  const o = openBySlug[s] ?? (openBySlug[s] = { n: 0, byPref: {}, sample: [] });
+  o.n++;
+  if (nt.pref) o.byPref[nt.pref] = (o.byPref[nt.pref] || 0) + 1;
+  if (o.sample.length < 3 || (nt.deadline && nt.deadline >= TODAY && o.sample.length < 6)) {
+    o.sample.push({ name: nt.name.slice(0, 80), org: nt.org, deadline: nt.deadline || '', url: nt.url });
+  }
+}
 mkdirSync(join(DIST, 'shindan'), { recursive: true });
 writeFileSync(join(DIST, 'shindan', 'data.json'),
-  JSON.stringify({ mins: MINISTRIES, cats: shindanStats }));
+  JSON.stringify({ mins: MINISTRIES, cats: shindanStats, open: openBySlug, openTotal: OPEN_NOTICES.length }));
 
 page('/shindan/', {
   title: `入札機会診断 — あなたの業種の官公庁市場が10秒でわかる | ${SITE}`,
@@ -811,6 +831,8 @@ function render(){
  var slug=scat.value,pref=spref.value;
  if(!slug){sout.innerHTML='';return}
  var c=S.cats.filter(function(x){return x.slug===slug})[0];
+ var op=(S.open||{})[slug];
+ var openN=op?(pref?(op.byPref[pref]||0):op.n):0;
  var peak=c.months.indexOf(Math.max.apply(null,c.months))+1;
  var pubM=((peak+10-1)%12)+1; // 公告はおおむね落札の2ヶ月前
  var html='<h2>あなたの市場: '+esc(c.label)+(pref?' × '+esc(pref)+'（参考）':'（国の機関・全国）')+'</h2>'
@@ -818,8 +840,11 @@ function render(){
   +'<div class="stat"><b>年間 約'+c.perYear.toLocaleString()+'件</b>発注件数（直近2年平均）</div>'
   +'<div class="stat"><b>'+yen(c.amountYear)+'</b>年間発注総額（2025年）</div>'
   +'<div class="stat"><b>'+esc(c.band)+'</b>最多の金額帯</div>'
-  +'<div class="stat"><b>'+peak+'月</b>落札の集中月（公告は'+pubM+'月頃〜）</div></div>'
+  +'<div class="stat"><b>'+peak+'月</b>落札の集中月（公告は'+pubM+'月頃〜）</div>'
+  +(op?'<div class="stat" style="border-color:#E8604C"><b style="color:#E8604C">'+openN.toLocaleString()+'件</b>いま開いている案件'+(pref?'（'+pref+'）':'（全国）')+'</div>':'')
+  +'</div>'
   +'<h3>発注が多い機関</h3><ul>'+c.topMins.map(function(m){return '<li><a href="/organ/'+m[0].toLowerCase()+'/">'+esc(S.mins[m[0]]||m[0])+'</a>（'+m[1].toLocaleString()+'件）</li>'}).join('')+'</ul>'
+  +(op&&op.sample.length?'<h3>いま公告中の案件（例）</h3><ul>'+op.sample.slice(0,4).map(function(x){return '<li>'+esc(x.name)+'（'+esc(x.org)+(x.deadline?'・入札 '+x.deadline:'')+'）'+(x.url?' <a href="'+x.url+'" rel="nofollow noopener" target="_blank">原文</a>':'')+'</li>'}).join('')+'</ul>':'')
   +'<div id="steiban"><p class="meta">定番案件を分析中…</p></div>'
   +'<div class="cta"><b>この条件の新着案件を、毎朝自動で受け取りませんか?</b><br>'
   +'いま準備中の有料プラン（月9,800円）では、あなたの条件に合う新着案件を毎朝、類似案件の落札相場つきでお届けします。<br><br>'
