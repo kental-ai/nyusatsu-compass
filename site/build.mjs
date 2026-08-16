@@ -1,7 +1,7 @@
 // 入札コンパス 静的サイト生成（外部依存ゼロ）
 // 使い方: node site/build.mjs  → site/dist に出力
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TAXONOMY } from '../pipeline/taxonomy.mjs';
@@ -172,7 +172,10 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:url" content="${canonical}">
 <meta property="og:locale" content="ja_JP">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="${ORIGIN}/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
@@ -290,6 +293,7 @@ function groupTable(list, keyFn, labelFn, linkFn = null, limit = 10) {
 // ---------- 生成 ----------
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
+if (existsSync(join(ROOT, 'site', 'static'))) cpSync(join(ROOT, 'site', 'static'), join(DIST, 'assets'), { recursive: true });
 const urls = [];
 
 // 相場ページ（類似案件検索ツール + 洞察 + 金額帯 + 発注カレンダー）
