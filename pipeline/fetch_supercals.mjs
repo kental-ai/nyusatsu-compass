@@ -9,6 +9,7 @@ import { classify } from './taxonomy.mjs';
 // 採用県のインスタンス表（偵察で3手プロトコル実証済みのものだけ追加する）
 export const INSTANCES = {
   chiba: { base: 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '千葉県' },
+  shizuoka: { base: 'https://www.ppi.cals-shiz.jp/ebidPPIPublish/EjPPIj', pref: '静岡県' }, // 2024年度〜・法人番号あり・県+市町村
 };
 
 const slug = process.argv[2] || 'chiba';
@@ -60,13 +61,15 @@ function parseList(html) {
     const cells = [...tr.matchAll(/<T[DH][^>]*>([\s\S]*?)<\/T[DH]>/gi)].map((m) => strip(m[1]));
     if (cells.length === 1 && /令和|平成/.test(cells[0])) { currentOrg = cells[0].replace(/令和\d+年度|平成\d+年度/, '').trim(); continue; }
     if (cells.length < 7 || cells[0] === 'No' || !/^\d+$/.test(cells[0])) continue;
-    const corpNo = (cells[5].match(/法人番号\s*(\d{13})/) || [])[1] || '';
+    const off = cells.length >= 9 ? 1 : 0; // 静岡型は「入札方法(紙/電子)」列が1本挟まる9列構成
+    const wcell = cells[5 + off] || '';
+    const corpNo = (wcell.match(/法人番号\s*(\d{13})/) || [])[1] || '';
     rows.push({
       org: currentOrg.split(/\s+/)[0] || '', dept: currentOrg,
       open_date: waDate(cells[1]), name: cells[2].replace(/※添付有/, '').trim(),
       category: cells[3], method: cells[4],
-      winner: cells[5].replace(/法人番号\s*(\d{13}|[－ー-])?/, '').trim(), corp_no: corpNo,
-      amount: Number((cells[6].match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0),
+      winner: wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').trim(), corp_no: corpNo,
+      amount: Number(((cells[6 + off] || '').match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0),
     });
   }
   return { total, over, rows };
