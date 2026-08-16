@@ -597,7 +597,7 @@ page('/alert/thanks/', {
 });
 
 // 自治体ハブ（収録都道府県ごとに自動生成）
-const PREF_SLUGS = { '千葉県': 'chiba', '秋田県': 'akita' };
+const PREF_SLUGS = { '千葉県': 'chiba', '秋田県': 'akita', '静岡県': 'shizuoka' };
 const localByPref = new Map();
 for (const a of LOCALS) (localByPref.get(a.pref) ?? localByPref.set(a.pref, []).get(a.pref)).push(a);
 for (const [prefName, plist] of localByPref) {
@@ -768,7 +768,7 @@ page('/about/', {
 </ul>
 <h2>データの限界（正直な注意書き）</h2>
 <ul>
-<li>収録範囲は<b>国の機関（府省・独立行政法人等）の落札実績</b>と、<b>自治体は千葉・秋田県域（県+市町村）から順次収録中</b>（2026年8月開始）です</li>
+<li>収録範囲は<b>国の機関（府省・独立行政法人等）の落札実績</b>と、<b>自治体は千葉・秋田・静岡県域（県+市町村）から順次収録中</b>（2026年8月開始）です</li>
 <li>収録元は政府電子調達（GEPS）経由の案件が中心のため、一部の省庁調達
 （例: 地方整備局の工事の一部）は含まれない場合があります</li>
 <li>「次回公告の目安」は過去の繰り返しパターンからの推定であり、発注を保証するものではありません</li>
