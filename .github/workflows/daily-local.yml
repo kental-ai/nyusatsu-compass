@@ -20,7 +20,7 @@ jobs:
           Y=$(TZ=Asia/Tokyo date +%Y)
           M=$(TZ=Asia/Tokyo date +%m)
           FY=$Y; if [ "$M" -lt 04 ]; then FY=$((Y-1)); fi
-          node pipeline/fetch_chiba.mjs $FY all
+          node pipeline/fetch_supercals.mjs chiba $FY all
           node pipeline/fetch_akita.mjs $FY
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット

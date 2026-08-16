@@ -1,12 +1,20 @@
-// ちば電子調達システム（SuperCALS）から入札結果（落札者・金額・法人番号つき）を取得するプロトタイプ。
-// 使い方: node pipeline/fetch_chiba.mjs [年度] [KikanNOをカンマ区切り|all]
-//   例: node pipeline/fetch_chiba.mjs 2025 1200000,1210000,1220400
-// 一覧HTMLに落札者名+法人番号+金額が直接載るため、詳細ページ巡回が不要（リクエスト最少）。
-// 直列・500ms間隔。700件制限は開札日範囲の二分割で回避。
+// SuperCALS（富士通 入札情報公開サービス）から入札結果を取得する汎用フェッチャー。
+// 使い方: node pipeline/fetch_supercals.mjs <インスタンスslug> [年度] [KikanNOカンマ区切り|all]
+//   例: node pipeline/fetch_supercals.mjs chiba 2025 all
+// 一覧HTMLに落札者名(+多くは法人番号)+金額が直接載るため、詳細ページ巡回が不要。
+// 直列・500ms間隔。700件制限は開札日範囲の二分割(total<=500)で回避。
 import { openDb } from './db.mjs';
 import { classify } from './taxonomy.mjs';
 
-const BASE = 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj';
+// 採用県のインスタンス表（偵察で3手プロトコル実証済みのものだけ追加する）
+export const INSTANCES = {
+  chiba: { base: 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '千葉県' },
+};
+
+const slug = process.argv[2] || 'chiba';
+const INST = INSTANCES[slug];
+if (!INST) { console.error(`未知のインスタンス: ${slug}（候補: ${Object.keys(INSTANCES).join(', ')}）`); process.exit(1); }
+const BASE = INST.base;
 const DELAY = 500;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sjis = new TextDecoder('shift_jis');
@@ -93,8 +101,8 @@ async function collectKikan(nendo, kikan, range = null) {
 }
 
 // ---- main ----
-const nendo = process.argv[2] || '2025';
-const kikansArg = process.argv[3] || '1200000'; // 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）
+const nendo = process.argv[3] || String(new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1);
+const kikansArg = process.argv[4] ?? 'all'; // 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）
 
 const db = openDb();
 db.exec(`
@@ -126,14 +134,14 @@ const kikans = kikansArg === 'all' ? [''] : kikansArg.split(',');
 const now = new Date().toISOString();
 const ins = db.prepare(`INSERT OR IGNORE INTO local_awards
   (src, org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, first_seen)
-  VALUES ('chiba', ?, ?, '千葉県', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 let grand = 0;
 for (const k of kikans) {
   const rows = await collectKikan(nendo, k);
   db.exec('BEGIN');
   let n = 0;
   for (const r of rows) {
-    const res = ins.run(r.org, r.dept, r.name, r.open_date, r.category, r.method,
+    const res = ins.run(slug, r.org, r.dept, INST.pref, r.name, r.open_date, r.category, r.method,
       r.winner, r.corp_no, r.amount, classify(r.name), Number(nendo), now);
     n += res.changes;
   }
@@ -141,5 +149,5 @@ for (const k of kikans) {
   grand += n;
   console.log(`KikanNO=${k}: 取得${rows.length}行 → 新規${n}件`);
 }
-const c = db.prepare(`SELECT COUNT(*) c, COUNT(DISTINCT corporate_no) k FROM local_awards`).get();
-console.log(`合計: 新規${grand}件 / local_awards総数${c.c}件・法人番号ユニーク${c.k} / リクエスト${requestCount}回`);
+const c = db.prepare(`SELECT COUNT(*) c, COUNT(DISTINCT corporate_no) k FROM local_awards WHERE src = '${slug}'`).get();
+console.log(`合計[${slug}]: 新規${grand}件 / 累計${c.c}件・法人番号ユニーク${c.k} / リクエスト${requestCount}回`);
