@@ -84,6 +84,27 @@ const monthMode = (list) => {
   return Number(Object.keys(m).sort((x, y) => m[y] - m[x])[0] || 0);
 };
 
+// 満了レーダー: 3年以上続く年次契約で、直近に実績があり今年度まだ公告されていない=次回公告が近い契約
+const RADAR_FY = Number(BUILT_AT.slice(5, 7)) >= 4 ? Number(BUILT_AT.slice(0, 4)) : Number(BUILT_AT.slice(0, 4)) - 1;
+const noticeKeys = new Set(NOTICES.map((n) => normName(n.name)));
+const radarBySlug = new Map();
+for (const [, arr] of clusters) {
+  const years = new Set(arr.map((a) => a.award_date.slice(0, 4)));
+  if (years.size < 3) continue;
+  const latest = Math.max(...arr.map((a) => +a.award_date.slice(0, 4)));
+  if (latest < RADAR_FY - 1) continue;                              // 途切れた契約は除外
+  if (arr.some((a) => +a.award_date.slice(0, 4) >= RADAR_FY)) continue; // 今年度落札済みは除外
+  const last = [...arr].sort((x, y) => (x.award_date < y.award_date ? 1 : -1))[0];
+  if (!last.slug || last.slug === 'other') continue;
+  const m = monthMode(arr);
+  const item = {
+    name: last.name, ministry: last.ministry_code, month: m, pubMonth: ((m + 10 - 1) % 12) + 1,
+    lastYear: latest, lastWinner: last.winner_name, lastCorp: last.corporate_no, amount: last.amount,
+    years: years.size, open: noticeKeys.has(normName(last.name)),
+  };
+  (radarBySlug.get(last.slug) ?? radarBySlug.set(last.slug, []).get(last.slug)).push(item);
+}
+
 // ---------- レイアウト（航海図ポップ: ネイビー×クリーム×コーラル + Zen Maru Gothic） ----------
 const CSS = `
 :root{--navy:#16324F;--cream:#FDF6EC;--coral:#E8604C;--brass:#F4B942;--shallow:#EAF2F8;
@@ -391,6 +412,42 @@ page('/price/', {
   body: `<h1>業務別の落札相場</h1><ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS)
     .map((t) => `<li><a href="/price/${t.slug}/">${t.label}</a>（${(byCat.get(t.slug) || []).length.toLocaleString()}件）</li>`).join('')}</ul>`,
 });
+
+// 満了レーダーページ（業務別。次回公告が近い継続契約の予測。国内唯一のコンテンツ）
+const MONTHS_JP = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+let radarCount = 0;
+const radarSlugs = [];
+for (const t of TAXONOMY) {
+  const items = radarBySlug.get(t.slug);
+  if (!items || items.length < 10) continue;
+  radarCount++;
+  radarSlugs.push(t.slug);
+  items.sort((a, b) => a.pubMonth - b.pubMonth || (b.amount || 0) - (a.amount || 0));
+  const openN = items.filter((i) => i.open).length;
+  page(`/radar/${t.slug}/`, {
+    title: `${t.label}の入札 次回公告カレンダー【継続契約${items.length.toLocaleString()}件の満了予測】｜${SITE}`,
+    desc: `${t.label}で毎年繰り返し発注されている継続契約の「次回公告はいつ頃か」を過去の周期から予測。前回の落札者・金額つき。${items.length.toLocaleString()}件の満了予測を月別に公開（毎日更新）。`,
+    crumb: [['満了レーダー', '/radar/'], [t.label, '']],
+    lastmod: BUILT_AT,
+    body: `<h1>${t.label}の入札 次回公告カレンダー</h1>
+${kunSays(`${t.label}で毎年くり返し発注されている継続契約<b>${items.length.toLocaleString()}件</b>について、過去の周期から<b>次の公告が来そうな時期</b>を予測したよ${openN ? `。うち<b>${openN}件</b>はいま公告が出ている可能性があるよ!` : ''}`)}
+<p class="meta">各契約が例年どの時期に公告・落札されているかを、過去の周期から示しています（発注を保証するものではありません）。公告は落札のおおむね1〜2ヶ月前に出ます。前回落札から年度が変わり、次の公告が控えている継続契約を対象にしています。</p>
+<div class="wrap"><table><tr><th>例年の公告時期</th><th>契約名</th><th>発注機関</th><th>前回落札</th><th>前回落札者</th><th>状態</th></tr>
+${items.slice(0, 120).map((i) => `<tr><td>例年${MONTHS_JP[i.pubMonth - 1]}頃</td><td>${esc(i.name)}</td><td>${esc(MINISTRIES[i.ministry] || i.ministry)}</td><td class="num">${i.lastYear}年 ${yen(i.amount)}</td><td>${i.lastCorp && byCompany.has(i.lastCorp) && (byCompany.get(i.lastCorp) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${i.lastCorp}/">${esc(i.lastWinner)}</a>` : esc(i.lastWinner)}</td><td>${i.open ? '<b style="color:#E8604C">公告中かも</b>' : `${i.years}年連続`}</td></tr>`).join('\n')}</table></div>
+<p><a href="/price/${t.slug}/">→ ${t.label}の落札相場を見る</a></p>`,
+  });
+}
+if (radarCount) {
+  page('/radar/', {
+    title: `入札 満了レーダー — 次回公告が近い継続契約の予測 | ${SITE}`,
+    desc: '官公庁の継続契約が「次にいつ公告されるか」を過去の落札周期から予測。業務分野別に次回公告カレンダーを公開。入札の先回り準備に。',
+    crumb: [['満了レーダー', '']],
+    body: `<h1>入札 満了レーダー</h1>
+${kunSays('毎年くり返される契約の「次はいつ公告されるか」を、過去の落札周期から予測しているよ。入札の準備を先回りできる、入札コンパスだけのデータだよ!')}
+<p>官公庁の継続契約について、過去の落札周期から次回公告時期を予測しています。業務分野を選んでください。</p>
+<ul>${radarSlugs.map((s) => `<li><a href="/radar/${s}/">${LABEL[s]}の次回公告カレンダー</a>（${radarBySlug.get(s).length.toLocaleString()}件）</li>`).join('')}</ul>`,
+  });
+}
 
 // 企業ページ（概況文・契約ヒストリー・次回予測・同じ土俵の企業）
 const nameCounts = new Map();
@@ -844,7 +901,7 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
-<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a> ／ <a href="/weekly/">→ 週間レポート</a>${LOCALS.length ? ` ／ <a href="/local/">→ 自治体の入札結果</a>` : ''}</p>`,
+<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a> ／ <a href="/radar/">→ 満了レーダー</a> ／ <a href="/weekly/">→ 週間レポート</a>${LOCALS.length ? ` ／ <a href="/local/">→ 自治体の入札結果</a>` : ''}</p>`,
 });
 
 // 類似案件検索エンジン（全相場ページ共通・キャッシュされる）
@@ -997,4 +1054,4 @@ shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
 writeFileSync(join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shards.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
 
-console.log(`生成完了: 計${urls.length}ページ（相場${priceCount}+地域相場${regionPriceCount} / 企業${companyCount} / 機関${organCount}）→ site/dist`);
+console.log(`生成完了: 計${urls.length}ページ（相場${priceCount}+地域相場${regionPriceCount}+満了レーダー${radarCount} / 企業${companyCount} / 機関${organCount}）→ site/dist`);
