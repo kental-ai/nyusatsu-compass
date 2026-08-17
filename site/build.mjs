@@ -36,6 +36,10 @@ let LOCALS = [];
 try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year FROM local_awards ORDER BY open_date DESC`).all(); } catch {}
 const byCorpLocal = new Map();
 for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? byCorpLocal.set(a.corporate_no, []).get(a.corporate_no)).push(a);
+const PREF_SLUGS = { '千葉県': 'chiba', '秋田県': 'akita', '静岡県': 'shizuoka' };
+// 地域×業務の相場（自治体データ）: pref|slug → awards[]
+const localByPrefCat = new Map();
+for (const a of LOCALS) { if (!a.slug || a.slug === 'other') continue; const k = a.pref + '|' + a.slug; (localByPrefCat.get(k) ?? localByPrefCat.set(k, []).get(k)).push(a); }
 
 let NOTICES = [];
 try {
@@ -338,11 +342,44 @@ ${kunSays(insights(list, `${t.label}`))}
 <h2>落札額の分布</h2>
 ${statBoxes([['実績件数', list.length.toLocaleString() + '件'], ['最も多い金額帯', topBand], ['全体の中央値', yen(med)]])}
 ${bandTable(list)}
+${(() => { const regs = [...localByPrefCat.entries()].filter(([k, v]) => k.endsWith('|' + t.slug) && v.length >= 30).map(([k]) => k.split('|')[0]); return regs.length ? `<h2>地域別の相場</h2><p>${regs.map((pn) => `<a href="/price/${t.slug}/${PREF_SLUGS[pn]}/">${pn}の${t.label}</a>`).join(' ／ ')}</p>` : ''; })()}
 <h2>発注時期のパターン</h2>${monthChart(list, t.label)}
 <h2>発注が多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => `/organ/${k.toLowerCase()}/`)}
 <h2>落札件数の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
 <h2>入札方式の内訳</h2>${groupTable(list, (a) => a.method_code, (k) => BIDDING_METHODS[k] || k)}
 <h2>直近の落札事例</h2>${awardRows(recent)}`,
+  });
+}
+
+// 地域×業務の相場ページ（自治体データ。競合ゼロ棚。データ30件以上のみ）
+let regionPriceCount = 0;
+for (const [key, rlist] of localByPrefCat) {
+  if (rlist.length < 30) continue;
+  const [prefName, cslug] = key.split('|');
+  const pslug = PREF_SLUGS[prefName];
+  const label = LABEL[cslug];
+  if (!pslug || !label) continue;
+  regionPriceCount++;
+  const amounts = rlist.map((a) => a.amount).filter((n) => n > 0);
+  const med = median(amounts);
+  const orgAgg = new Map();
+  for (const a of rlist) { const o = orgAgg.get(a.org) ?? { n: 0, sum: 0 }; o.n++; o.sum += a.amount || 0; orgAgg.set(a.org, o); }
+  page(`/price/${cslug}/${pslug}/`, {
+    title: `${prefName}の${label}の落札相場・落札価格【入札実績${rlist.length.toLocaleString()}件】｜${SITE}`,
+    desc: `${prefName}と県内市町村が発注する「${label}」入札の落札相場。落札価格の中央値は${yen(med)}（実績${rlist.length.toLocaleString()}件・毎日更新）。発注自治体・金額帯・直近の落札事例をデータで公開。`,
+    crumb: [['落札相場', '/price/'], [label, `/price/${cslug}/`], [prefName, '']],
+    lastmod: rlist[0]?.open_date,
+    jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${prefName}の${label}落札実績データ`, description: `${prefName}域の${label}に関する落札実績${rlist.length}件`, creator: { '@type': 'Organization', name: SITE } },
+    body: `<h1>${prefName}の${label} 落札相場</h1>
+${kunSays(`${prefName}域（県+市町村）の「${label}」の落札実績を<b>${rlist.length.toLocaleString()}件</b>集めたよ。落札価格の中央値は<b>${yen(med)}</b>だよ。`)}
+${statBoxes([['実績件数', rlist.length.toLocaleString() + '件'], ['落札価格の中央値', yen(med)], ['最高額', yen(Math.max(...amounts, 0))]])}
+<h2>金額帯の分布</h2>${bandTable(rlist)}
+<h2>発注する自治体</h2><div class="wrap"><table><tr><th>自治体</th><th>件数</th><th>合計金額</th></tr>
+${[...orgAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 20).map(([o, v]) => `<tr><td>${esc(o)}</td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
+<h2>発注時期のパターン</h2>${monthChart(rlist.map((a) => ({ award_date: a.open_date })), `${prefName}の${label}`)}
+<h2>直近の落札事例</h2><div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>自治体</th><th>落札者</th><th>金額</th></tr>
+${rlist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>
+<p><a href="/price/${cslug}/">→ ${label}の全国（国の機関）の相場を見る</a></p>`,
   });
 }
 
@@ -601,7 +638,6 @@ page('/alert/thanks/', {
 });
 
 // 自治体ハブ（収録都道府県ごとに自動生成）
-const PREF_SLUGS = { '千葉県': 'chiba', '秋田県': 'akita', '静岡県': 'shizuoka' };
 const localByPref = new Map();
 for (const a of LOCALS) (localByPref.get(a.pref) ?? localByPref.set(a.pref, []).get(a.pref)).push(a);
 for (const [prefName, plist] of localByPref) {
@@ -961,4 +997,4 @@ shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
 writeFileSync(join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shards.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
 
-console.log(`生成完了: 計${urls.length}ページ（相場${priceCount} / 企業${companyCount} / 機関${organCount}）→ site/dist`);
+console.log(`生成完了: 計${urls.length}ページ（相場${priceCount}+地域相場${regionPriceCount} / 企業${companyCount} / 機関${organCount}）→ site/dist`);
