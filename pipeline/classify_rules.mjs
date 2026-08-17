@@ -20,6 +20,17 @@ const ins = db.prepare(`INSERT INTO enrich_class (award_rowid, slug, method) VAL
 for (const r of rows) ins.run(r.rowid, classify(r.name));
 db.exec('COMMIT');
 
+// 自治体データ(local_awards)も同じルールで再分類（取得時slugを最新taxonomyで上書き）
+try {
+  const locs = db.prepare(`SELECT rowid, name FROM local_awards`).all();
+  const upd = db.prepare(`UPDATE local_awards SET slug = ? WHERE rowid = ?`);
+  db.exec('BEGIN');
+  for (const r of locs) upd.run(classify(r.name), r.rowid);
+  db.exec('COMMIT');
+  const lo = db.prepare(`SELECT COUNT(*) n FROM local_awards WHERE slug != 'other'`).get();
+  console.log(`local_awards再分類: ${lo.n}/${locs.length} (${(lo.n / locs.length * 100).toFixed(1)}%)`);
+} catch { /* local_awards未取得環境ではスキップ */ }
+
 const total = rows.length;
 const stats = db.prepare(`SELECT slug, COUNT(*) n FROM enrich_class GROUP BY slug ORDER BY n DESC`).all();
 const labels = Object.fromEntries(TAXONOMY.map((t) => [t.slug, t.label]));
