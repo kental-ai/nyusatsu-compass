@@ -428,7 +428,7 @@ for (const t of TAXONOMY) {
     title: `${t.label}の入札 次回公告カレンダー【継続契約${items.length.toLocaleString()}件の満了予測】｜${SITE}`,
     desc: `${t.label}で毎年繰り返し発注されている継続契約の「次回公告はいつ頃か」を過去の周期から予測。前回の落札者・金額つき。${items.length.toLocaleString()}件の満了予測を月別に公開（毎日更新）。`,
     crumb: [['満了レーダー', '/radar/'], [t.label, '']],
-    lastmod: BUILT_AT,
+    lastmod: AWARDS[0]?.award_date || BUILT_AT, // データ由来の日付に統一（IndexNowの更新判定に使うため）
     body: `<h1>${t.label}の入札 次回公告カレンダー</h1>
 ${kunSays(`${t.label}で毎年くり返し発注されている継続契約<b>${items.length.toLocaleString()}件</b>について、過去の周期から<b>次の公告が来そうな時期</b>を予測したよ${openN ? `。うち<b>${openN}件</b>はいま公告が出ている可能性があるよ!` : ''}`)}
 <p class="meta">各契約が例年どの時期に公告・落札されているかを、過去の周期から示しています（発注を保証するものではありません）。公告は落札のおおむね1〜2ヶ月前に出ます。前回落札から年度が変わり、次の公告が控えている継続契約を対象にしています。</p>
@@ -561,6 +561,8 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
 
   // FAQ（AI検索・リッチリザルト向け。回答は全て実データ）
   const faqs = [];
+  faqs.push([`${name}の法人番号は?`,
+    `${name}の法人番号は${corpNo}です（国税庁の法人番号。調達ポータルの落札実績オープンデータに記載のもの）。当サイトではこの法人番号をキーに、官公庁入札の落札実績${list.length.toLocaleString()}件を集計しています。`]);
   faqs.push([`${name}は官公庁との取引実績がありますか?`,
     `はい。当サイト収録範囲（国の機関・2013年度以降）で${list.length.toLocaleString()}件・総額${yen(total)}の落札実績があります。直近は${list[0].award_date}の「${list[0].name}」（${MINISTRIES[list[0].ministry_code] || '国の機関'}・${yen(list[0].amount)}）です。`]);
   faqs.push([`${name}はどの機関のどんな案件を受注していますか?`,
@@ -589,7 +591,7 @@ ${cl.slice(0, 8).map((x) => `<tr><td>${x.award_date}</td><td>${x.corporate_no ==
 
   page(`/company/${corpNo}/`, {
     title: `${name}の落札実績・入札情報【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
-    desc: `${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
+    desc: `${name}の法人番号は${corpNo}。${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
     lastmod: list[0]?.award_date,
     jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` }, faqLd],
