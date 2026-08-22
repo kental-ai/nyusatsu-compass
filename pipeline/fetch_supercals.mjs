@@ -10,6 +10,9 @@ import { classify } from './taxonomy.mjs';
 export const INSTANCES = {
   chiba: { base: 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '千葉県' },
   shizuoka: { base: 'https://www.ppi.cals-shiz.jp/ebidPPIPublish/EjPPIj', pref: '静岡県' }, // 2024年度〜・法人番号あり・県+市町村
+  miyazaki: { base: 'https://www.e-nyusatsu-joho.pref.miyazaki.lg.jp/ebidPPIPublish/EjPPIj', pref: '宮崎県' }, // 法人番号あり・14機関
+  // 愛媛: 2026-08-23時点で保留。8列型だが一部の行で案件名セルが分割され列がずれる（原因未特定）。
+  //       原因を特定するまで本番投入しない。 ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県' },
 };
 
 const slug = process.argv[2] || 'chiba';
@@ -46,9 +49,11 @@ async function req(body = null) {
   return { status: res.status, text: sjis.decode(buf) };
 }
 
-const waDate = (s) => { // 'R07-07-01' → '2025-07-01'
-  const m = s.match(/R(\d{2})-(\d{2})-(\d{2})/);
-  return m ? `${2018 + Number(m[1])}-${m[2]}-${m[3]}` : '';
+const waDate = (s) => { // 'R07-07-01' / '令和07/06/05' / 'R07/06/05' → '2025-07-01'
+  const m = s.match(/(?:R|令和)\s?(\d{1,2})[-/年]\s?(\d{1,2})[-/月]\s?(\d{1,2})/);
+  if (!m) return '';
+  const p2 = (x) => String(x).padStart(2, '0');
+  return `${2018 + Number(m[1])}-${p2(m[2])}-${p2(m[3])}`;
 };
 const strip = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ').trim();
 
