@@ -22,6 +22,7 @@ jobs:
           FY=$Y; if [ "$M" -lt 04 ]; then FY=$((Y-1)); fi
           node pipeline/fetch_supercals.mjs chiba $FY all
           node pipeline/fetch_supercals.mjs shizuoka $FY all
+          node pipeline/fetch_supercals.mjs miyazaki $FY all
           node pipeline/fetch_akita.mjs $FY
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
