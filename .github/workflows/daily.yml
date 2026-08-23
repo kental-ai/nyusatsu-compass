@@ -3,7 +3,7 @@
 name: daily-rebuild
 on:
   schedule:
-    - cron: '0 21 * * *'   # 21:00 UTC = 6:00 JST
+    - cron: '0 23 * * *'   # 23:00 UTC = 8:00 JST（7:00の自治体スナップショット更新の後）
   workflow_dispatch:
 jobs:
   trigger:
