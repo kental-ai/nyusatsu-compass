@@ -152,3 +152,9 @@ INSTANCES に団体名つきで追加すること（推測で名前を付ける�
 `.github/workflows/daily-local.yml` に ehime / niigata / tochigi / ishikawa / okinawa を追加。
 共有ホスト勢は平日6:00〜23:00 JST のみ稼働で、日次実行は7:00 JST なので平日は取得できる
 （土日は0件で無害に終わる）。1セッションの総リクエストは約600件。
+
+### 副産物: 地域ページの自治体名にゆれがある（local_awards ではなく notices 由来）
+生成物を確認したところ `/local/ishikawa/津幡市/`（正しくは津幡町）、`/local/ishikawa/内灘町/` と
+`/local/ishikawa/河北郡内灘町/` の重複、`/local/ehime/伊方町/` と `/local/ehime/西宇和郡伊方町/` の重複がある。
+いずれも KKJ 公告データ（notices.city）が出所で、今回追加した落札データ側ではない。
+自治体名の正規化（郡名の除去・市町村の取り違え）は別途対応する。
