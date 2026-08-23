@@ -788,6 +788,40 @@ ${faqHtml}`,
   });
 }
 
+let catIndexHtml = '';
+// 業種別の企業索引（主戦場=最頻分野で企業を引ける。企業ページへの第3のクロール経路）
+{
+  const byPrimaryCat = new Map();
+  for (const [no, l] of byCompany) {
+    if (l.length < MIN_COMPANY_AWARDS) continue;
+    const cnt = new Map();
+    for (const a of l) if (a.slug && a.slug !== 'other') cnt.set(a.slug, (cnt.get(a.slug) || 0) + 1);
+    const top = [...cnt.entries()].sort((x, y) => y[1] - x[1])[0];
+    if (!top) continue;
+    (byPrimaryCat.get(top[0]) ?? byPrimaryCat.set(top[0], []).get(top[0])).push([no, l.length, top[1]]);
+  }
+  const CPER = 200;
+  for (const [slug, list] of byPrimaryCat) {
+    list.sort((x, y) => y[1] - x[1]);
+    const pages = Math.ceil(list.length / CPER);
+    for (let pg = 0; pg < pages; pg++) {
+      const slice = list.slice(pg * CPER, (pg + 1) * CPER);
+      const path = pg === 0 ? `/company/cat/${slug}/` : `/company/cat/${slug}/page/${pg + 1}/`;
+      const nav = pages > 1 ? `<p>${pg > 0 ? `<a href="${pg === 1 ? `/company/cat/${slug}/` : `/company/cat/${slug}/page/${pg}/`}">← 前へ</a>　` : ''}${pg + 1} / ${pages}ページ${pg < pages - 1 ? `　<a href="/company/cat/${slug}/page/${pg + 2}/">次へ →</a>` : ''}</p>` : '';
+      page(path, {
+        title: `${LABEL[slug]}を主力とする落札企業一覧${pg ? `（${pg + 1}ページ目）` : ''}【${list.length.toLocaleString()}社】｜${SITE}`,
+        desc: `官公庁入札で「${LABEL[slug]}」分野の落札が最も多い企業${list.length.toLocaleString()}社を落札件数順に掲載。各社の落札実績・取引機関・継続契約の履歴へ。`,
+        crumb: pg === 0 ? [['落札企業', '/company/'], [LABEL[slug], '']] : [['落札企業', '/company/'], [LABEL[slug], `/company/cat/${slug}/`], [`${pg + 1}ページ目`, '']],
+        body: `<h1>${LABEL[slug]}を主力とする落札企業</h1>
+<p>官公庁入札の落札実績のうち「${LABEL[slug]}」分野が最も多い企業です。相場は<a href="/price/${slug}/">${LABEL[slug]}の落札相場</a>、次回公告の目安は<a href="/radar/${slug}/">満了レーダー</a>へ。</p>${nav}
+<ol start="${pg * CPER + 1}">${slice.map(([no, n, c]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（全${n.toLocaleString()}件・うち${LABEL[slug]}${c.toLocaleString()}件）</li>`).join('')}</ol>${nav}`,
+      });
+    }
+  }
+  // 企業ハブ（1ページ目）に業種索引への導線
+  catIndexHtml = `<h2>業種別に探す</h2><p>${[...byPrimaryCat.entries()].sort((x, y) => y[1].length - x[1].length).map(([s, l]) => `<a href="/company/cat/${s}/">${LABEL[s]}</a>（${l.length.toLocaleString()}社）`).join(' ／ ')}</p>`;
+}
+
 // 企業ハブ（全社をページネーションで列挙 → 内部リンク孤児をなくす）
 const topCompanies = [...byCompany.entries()].filter(([, l]) => l.length >= MIN_COMPANY_AWARDS)
   .sort((x, y) => y[1].length - x[1].length);
@@ -803,7 +837,7 @@ for (let p = 0; p < hubPages; p++) {
     desc: `官公庁入札で落札実績のある企業${companyCount.toLocaleString()}社を法人番号ベースで収録。落札件数順の一覧${p + 1}ページ目。`,
     crumb: p === 0 ? [['落札企業', '']] : [['落札企業', '/company/'], [`${p + 1}ページ目`, '']],
     body: `<h1>落札企業データベース${p > 0 ? `（${p + 1}ページ目）` : ''}</h1>
-<p>官公庁入札で落札実績のある${companyCount.toLocaleString()}社を収録（落札件数順）。</p>${nav}
+<p>官公庁入札で落札実績のある${companyCount.toLocaleString()}社を収録（落札件数順）。</p>${p === 0 ? catIndexHtml : ''}${nav}
 <ol start="${p * PER_PAGE + 1}">${slice.map(([no, l]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ol>${nav}`,
   });
 }
