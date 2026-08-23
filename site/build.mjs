@@ -30,7 +30,7 @@ const median = (arr) => { const a = [...arr].sort((x, y) => x - y); return a.len
 // gM(): 無料会員（メール登録）で開く値。HTMLには伏字を出し、実値はbase64で持たせてcookie(nc_member)があればJSで復元。
 // gP(): 有料（ウォッチ会員）限定。実値は出さず、桁だけ見せる伏字（teaseYen）で「答えの存在」を示す。
 const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
-const gM = (html, plain) => `<span class="g g-m" data-v="${b64(html)}" title="無料会員で表示">${plain ?? '●●●'}</span>`;
+const gM = (html, plain) => `<span class="g g-m" data-v="${b64(html)}" title="無料会員登録して続きを見る">${plain ?? '●●●'}</span>`;
 const teaseYen = (n) => { // 591万円→5●●万円 / 1,234万円→1,●●●万円 / 2.3億円→2.●億円
   if (!(n > 0)) return '●●●万円';
   if (n >= 1e8) { const v = (n / 1e8).toFixed(1); return `${v[0]}${v.length > 3 ? '●' : ''}.●億円`; }
@@ -40,7 +40,10 @@ const teaseYen = (n) => { // 591万円→5●●万円 / 1,234万円→1,●●�
   return `${body}万円`;
 };
 const gP = (tease) => `<span class="g g-p" title="ウォッチ会員限定">${tease} <span class="lk">🔒</span></span>`;
-const unlockBtn = (path) => `<a class="btn btn-s" href="/alert/?unlock=1&back=${encodeURIComponent(path)}">無料会員で表示</a>`;
+const CTA_LABEL = '無料会員登録して続きを見る';
+// 全サイト唯一の出口。文脈（戻り先・ウォッチ対象）はパラメータで持たせるだけで、ボタンと行き先は常に同じ
+const cta = (path, extra = '') => `<a class="btn" href="/alert/?back=${encodeURIComponent(path || '/')}${extra}">${CTA_LABEL}</a>`;
+const unlockBtn = (path) => cta(path);
 // 勝てる札の推定レンジ（参考値）: 前回額を中心に前回比トレンドを半分織り込み、-8%〜+4%
 const estimateRange = (arr) => {
   const s = arr.filter((a) => a.amount > 0);
@@ -307,12 +310,12 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 <script defer src="/assets/gate.js"></script>
 </head><body>
-<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/alert/">ウォッチ登録（無料）</a></div></header>
+<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/alert/?back=${encodeURIComponent(path)}">${CTA_LABEL}</a></div></header>
 <main>${crumbHtml}
 ${body}
-<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">あなたの業種、毎年どれくらい入れ替わる?</b><br>
-年間の発注件数・相場・公告シーズンに加えて「毎年何%の契約で落札者が入れ替わるか」を実データから10秒で診断。登録不要。<br><br>
-<a class="btn" href="/shindan/">入札機会診断をやってみる</a></div></div>
+${path === '/alert/' || path === '/alert/thanks/' ? '' : `<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">歴代の落札金額・前回比・契約の中央値・類似案件検索の全期間が、無料会員で開きます。</b><br>
+メール登録だけ。登録した瞬間に、このページの続きが見られます。<br><br>
+${cta(path)}</div></div>`}
 </main>
 <footer><div class="in">
 <p>${SITE} — 官公庁入札の落札相場・落札実績データベース。データ出典: 調達ポータル「落札実績オープンデータ」（政府標準利用規約準拠）ほか公的公表情報。最終更新: ${BUILT_AT}</p>
@@ -574,7 +577,7 @@ ${(() => { const r = estimateRange(arr); return `<div class="lockbox"><h3>この
 <p style="margin:4px 0"><b style="font-size:1.3rem">${r ? gP(teaseYen(r.lo) + ' 〜 ' + teaseYen(r.hi)) : gP('●●●万円 〜 ●●●万円')}</b></p>
 <p class="meta" style="margin:4px 0">根拠: 前回の落札額、前回比のトレンド、同分野・同規模帯の中央値、この分野の最低価格方式の比率から算出した参考レンジです。
 あわせて<b>狙い目スコア</b>（現職の固定度と入れ替わり確率）、<b>前回落札者の価格傾向</b>、<b>次の公告が出た瞬間の通知</b>をウォッチ会員に提供します（月9,800円・準備中）。</p>
-<p style="margin:8px 0 0"><a class="btn" href="/alert/?watch=contract&id=${id}&name=${encodeURIComponent(name)}">先行登録して案内を受け取る</a></p></div>`; })()}
+<p style="margin:8px 0 0">${cta(`/contract/${id}/`, `&watch=contract&id=${id}&name=${encodeURIComponent(name)}`)}</p></div>`; })()}
 ${kunSays(sentences.join(' '))}
 <h2>落札履歴（誰が・いくらで落としてきたか）</h2>
 <div class="wrap"><table><tr><th>落札日</th><th>落札者</th><th>落札価格</th><th>前回比</th><th>入札方式</th></tr>
@@ -583,9 +586,6 @@ ${arr.map((a, i) => { const prev = arr[i + 1]; const d = prev && prev.amount > 0
   return `<tr><td>${a.award_date}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${amt}</td><td class="num">${dd}</td><td>${esc(BIDDING_METHODS[a.method_code] || '')}</td></tr>`; }).join('\n')}</table></div>
 <p class="tbl-note unlock-hide">${arr.length > 1 ? `過去${arr.length - 1}件の落札金額と前回比は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/contract/${id}/`)}` : ''}</p>
 <p class="meta">案件名の年度表記ゆれ（令和◯年度等）を正規化して同一契約として束ねています。別契約が混在する場合は<a href="/policy/">こちら</a>からお知らせください。</p>
-<div class="cta" style="margin:20px 0"><div class="ctxt"><b class="mk">この契約をウォッチする</b><br>
-次の公告が出たとき、落札結果が出たときにメールで知らせます（無料登録・準備中の有料プランで即時通知）。<br><br>
-<a class="btn" href="/alert/?watch=contract&id=${id}&name=${encodeURIComponent(name)}">この契約をウォッチ登録</a></div></div>
 <h2>よくある質問</h2>${faqs.map(([q, a]) => `<h3>Q. ${esc(q)}</h3><p>A. ${esc(a)}</p>`).join('\n')}
 <p>${slug && slug !== 'other' ? `<a href="/price/${slug}/">→ ${LABEL[slug]}の相場・類似案件検索</a> ／ ` : ''}<a href="/organ/${ministry.toLowerCase()}/">→ ${esc(mname)}の入札結果を見る</a></p>`,
   });
@@ -863,9 +863,6 @@ ${list.length > 3 ? `<p class="tbl-note unlock-hide">4件目以降の落札金�
 <div class="lockbox"><h3>${esc(name)}の攻略データ（ウォッチ会員限定）</h3>
 <p style="margin:4px 0"><b>価格傾向</b>: 同分野・同規模帯の中央値比 ${gP('●●%')}　<b>保有する継続契約</b>: ${gP(histories.length ? `${histories.length}件` : '●件')}（次回公告の目安つき）　<b>新規落札の通知</b>: 即時</p>
 <p class="meta" style="margin:4px 0">この会社がどの価格帯で入れてくるか、いま持っている契約はいつ次の公告を迎えるか——競合として追うための材料です（月9,800円・準備中）。</p></div>
-<div class="cta" style="margin:20px 0"><div class="ctxt"><b class="mk">この会社をウォッチする</b><br>
-${esc(name)}が新たに落札したとき（どこで・いくらで）にメールで知らせます。競合の価格帯を追うのに。<br><br>
-<a class="btn" href="/alert/?watch=company&id=${corpNo}&name=${encodeURIComponent(name)}">この会社をウォッチ登録</a></div></div>
 ${faqHtml}`,
   });
 }
@@ -956,16 +953,18 @@ page('/organ/', {
 // アラートLP（POSTはNetlify Functionで中継。hidden formはNetlify Formsの検出用）
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
 page('/alert/', {
-  title: `ウォッチ登録 — 契約・競合・地域の結果と公告をお知らせ | ${SITE}`,
-  desc: '気になる契約・競合企業・発注機関・地域を登録すると、落札結果や公告が出たときにお知らせします。値付けの起点と結果確認を逃さないために。無料登録。',
-  body: `<h1>契約・競合・地域をウォッチする</h1>
-<p>気になる<b>契約</b>（次の公告・結果）、<b>競合企業</b>（新たな落札）、<b>発注機関・地域</b>（あなたの業種の公告・結果）を登録すると、
-動きがあったときにメールでお知らせします。まずは無料登録（月次まとめ）。即時通知の有料プラン（月9,800円・準備中）の先行案内もこちらから。</p>
+  title: `無料会員登録 — 歴代の落札金額・前回比・類似案件検索の全期間が開きます | ${SITE}`,
+  desc: 'メール登録だけで、すべての契約の歴代落札金額と前回比、契約ごとの中央値、類似案件検索の全期間が表示されます。月1回の入札機会レポートと、即時通知プランの先行案内も。',
+  body: `<h1>無料会員登録</h1>
+<p>メール登録だけで、いますぐ次が開きます。</p>
+<ul><li><b>すべての契約の歴代落札金額と前回比</b>（公式サイトでは消えてしまう過去の結果も）</li>
+<li><b>契約ごとの中央値・価格トレンド</b></li>
+<li><b>類似案件検索の全期間・100件表示</b></li>
+<li>月1回の「あなたの業種の入札機会レポート」</li></ul>
+<p class="meta">気になる契約・競合企業・地域を下の欄に書いておくと、結果や公告が出たときにお知らせする即時通知プラン（月9,800円・準備中）の先行案内をお送りします。</p>
 <div id="watchinfo" class="meta"></div>
-<div id="unlockinfo" class="lockbox" style="display:none"><h3>無料会員登録で、いますぐ開きます</h3><p style="margin:4px 0">歴代の落札金額と前回比、契約ごとの中央値、類似案件検索の全期間——メール登録だけで表示されます（無料）。登録後、元のページに戻れます。</p></div>
 <script>(function(){var q=new URLSearchParams(location.search);var w=q.get('watch'),n=q.get('name'),id=q.get('id');if(q.get('back'))try{sessionStorage.setItem('nc_back',q.get('back'))}catch(e){}
-if(q.get('unlock')){document.getElementById('unlockinfo').style.display='block';}
-if(w&&n){var lbl={contract:'契約',company:'会社',organ:'機関',local:'地域'}[w]||'対象';document.getElementById('watchinfo').innerHTML='ウォッチ対象（'+lbl+'）: <b>'+n.replace(/</g,'&lt;')+'</b>';var f=document.querySelector('input[name=watch_target]');if(f)f.value=lbl+':'+n+(id?' ['+id+']':'');}})();</script>
+if(w&&n){var lbl={contract:'契約',company:'会社',organ:'機関',local:'地域',cat:'分野'}[w]||'対象';document.getElementById('watchinfo').innerHTML='ウォッチ対象（'+lbl+'）: <b>'+n.replace(/</g,'&lt;')+'</b>';var f=document.querySelector('input[name=watch_target]');if(f)f.value=lbl+':'+n+(id?' ['+id+']':'');}})();</script>
 ${OPEN_NOTICES.length ? `<p class="meta">いま全国で公告中の案件: <b>${OPEN_NOTICES.length.toLocaleString()}件</b>（官公需情報ポータル連携・毎日更新）</p>` : ''}
 <form name="alert" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
 <input type="hidden" name="form-name" value="alert">
@@ -1290,7 +1289,7 @@ page('/', {
   body: `<h1>いくらで入れるか、決める前に見る。</h1>
 <p>官公庁入札の落札結果${AWARDS.length.toLocaleString()}件から、この契約は前回いくらで誰が取ったか・類似案件の相場・競合の価格帯を、札を入れる前に数分で。結果が出た瞬間のお知らせも。</p>
 ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録企業', companyCount.toLocaleString() + '社'], ['収録機関', organCount + '機関'], ['データ期間', '2013年度〜']])}
-<div class="cta"><b>まずは10秒診断から。</b>業種を選ぶだけで、年間発注件数・相場・公告シーズン・毎年出る定番案件がその場でわかります。<br><br><a href="/shindan/">入札機会診断をやってみる</a></div>
+<div class="cta"><div class="ctxt"><b class="mk">無料会員になると、すべての契約の歴代落札金額と前回比、類似案件検索の全期間が開きます。</b><br>メール登録だけ。<br><br>${cta('/')}</div></div>
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
@@ -1308,9 +1307,9 @@ document.addEventListener('DOMContentLoaded',function(){
     document.querySelectorAll('.g-m').forEach(function(el){var v=dec(el.getAttribute('data-v'));if(v){el.innerHTML=v;}});
     document.querySelectorAll('.unlock-hide').forEach(function(el){el.style.display='none'});
   }else{
-    document.querySelectorAll('.g-m').forEach(function(el){el.addEventListener('click',function(){location.href='/alert/?unlock=1&back='+back()})});
+    document.querySelectorAll('.g-m').forEach(function(el){el.addEventListener('click',function(){location.href='/alert/?back='+back()})});
   }
-  document.querySelectorAll('.g-p').forEach(function(el){el.addEventListener('click',function(){var b=document.querySelector('.lockbox');if(b){b.scrollIntoView({behavior:'smooth'});}else{location.href='/alert/?watch=1&back='+back()}})});
+  document.querySelectorAll('.g-p').forEach(function(el){el.addEventListener('click',function(){location.href='/alert/?back='+back()})});
   window.NC_MEMBER=member;
 });
 })();
@@ -1406,9 +1405,8 @@ function render(){
   +'<h3>発注が多い機関</h3><ul>'+c.topMins.map(function(m){return '<li><a href="/organ/'+m[0].toLowerCase()+'/">'+esc(S.mins[m[0]]||m[0])+'</a>（'+m[1].toLocaleString()+'件）</li>'}).join('')+'</ul>'
   +(op&&op.sample.length?'<h3>いま公告中の案件（例）</h3><ul>'+op.sample.slice(0,4).map(function(x){return '<li>'+esc(x.name)+'（'+esc(x.org)+(x.deadline?'・入札 '+x.deadline:'')+'）'+(x.url?' <a href="'+x.url+'" rel="nofollow noopener" target="_blank">原文</a>':'')+'</li>'}).join('')+'</ul>':'')
   +'<div id="steiban"><p class="meta">定番案件を分析中…</p></div>'
-  +'<div class="cta"><b>この条件の新着案件を、毎朝自動で受け取りませんか?</b><br>'
-  +'いま準備中の有料プラン（月9,800円）では、あなたの条件に合う新着案件を毎朝、類似案件の落札相場つきでお届けします。<br><br>'
-  +'<a href="/alert/">無料の月次レポートに登録して先行案内を受け取る</a></div>';
+  +'<div class="cta"><div class="ctxt"><b class="mk">この分野の契約ごとの歴代落札金額・前回比は、無料会員で開きます。</b><br>メール登録だけ。<br><br>'
+  +'<a class="btn" href="/alert/?back=%2Fshindan%2F&watch=cat&name='+encodeURIComponent(c.label)+'">無料会員登録して続きを見る</a></div></div>';
  sout.innerHTML=html;
  var render_id=slug+'|'+pref;sout.dataset.rid=render_id;
  (CATD[slug]?Promise.resolve(CATD[slug]):fetch('/price/'+slug+'/data.json').then(function(r){return r.json()}).then(function(j){CATD[slug]=j;return j}))
