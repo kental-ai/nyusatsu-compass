@@ -962,6 +962,8 @@ page('/alert/', {
 <li><b>類似案件検索の全期間・100件表示</b></li>
 <li>月1回の「あなたの業種の入札機会レポート」</li></ul>
 <p class="meta">気になる契約・競合企業・地域を下の欄に書いておくと、結果や公告が出たときにお知らせする即時通知プラン（月9,800円・準備中）の先行案内をお送りします。</p>
+<p id="invalidmsg" class="meta" style="display:none;color:#B8432F">リンクが無効でした。下のフォームから登録し直してください。</p>
+<script>if(new URLSearchParams(location.search).get('invalid'))document.getElementById('invalidmsg').style.display='block';</script>
 <div id="watchinfo" class="meta"></div>
 <script>(function(){var q=new URLSearchParams(location.search);var w=q.get('watch'),n=q.get('name'),id=q.get('id');if(q.get('back'))try{sessionStorage.setItem('nc_back',q.get('back'))}catch(e){}
 if(w&&n){var lbl={contract:'契約',company:'会社',organ:'機関',local:'地域',cat:'分野'}[w]||'対象';document.getElementById('watchinfo').innerHTML='ウォッチ対象（'+lbl+'）: <b>'+n.replace(/</g,'&lt;')+'</b>';var f=document.querySelector('input[name=watch_target]');if(f)f.value=lbl+':'+n+(id?' ['+id+']':'');}})();</script>
@@ -980,7 +982,17 @@ ${TAXONOMY.map((t) => `<option>${t.label}</option>`).join('')}
 ${PREFS.map((p) => `<option>${p}</option>`).join('')}</select></label></p>
 <p><button type="submit" style="background:#0f6ab2;color:#fff;border:0;padding:12px 32px;border-radius:6px;font-weight:700;font-size:1rem">無料で登録する</button></p>
 </form>
-<p class="meta">登録いただいたメールアドレスは案件通知以外に使用しません。配信はいつでも停止できます。</p>`,
+<p class="meta">登録いただいたメールアドレスは、会員機能の提供とレポート・案内の配信以外に使用しません。配信停止・退会はいつでもできます（<a href="/policy/">会員規約・プライバシー</a>）。</p>`,
+});
+page('/alert/welcome/', {
+  title: `会員を有効にしました | ${SITE}`,
+  desc: '無料会員が有効になりました。',
+  noindex: true,
+  body: `<div style="text-align:center;margin:24px 0">${kun(90, 'salute')}</div><h1 style="text-align:center">会員を有効にしました!</h1>
+<p style="text-align:center"><b>この端末で1年間、歴代の落札金額・前回比・契約の中央値・類似案件検索の全期間が表示されます。</b></p>
+<p id="backp" style="text-align:center"><a class="btn" href="/contract/">継続契約データベースを見る</a></p>
+<p class="meta" style="text-align:center">別の端末で見るときは、届いたメールの同じリンクを開いてください。</p>
+<script>(function(){var q=new URLSearchParams(location.search);var b=q.get('back');if(!b){try{b=sessionStorage.getItem('nc_back')}catch(e){}}if(b&&/^\\//.test(b)){document.getElementById('backp').innerHTML='<a class="btn" href="'+b.replace(/"/g,'')+'">元のページに戻って続きを見る</a>';}})();</script>`,
 });
 page('/alert/thanks/', {
   title: `登録ありがとうございます | ${SITE}`,
@@ -991,7 +1003,8 @@ page('/alert/thanks/', {
 <p id="backp" style="text-align:center"></p>
 <p>ウォッチ（結果・公告の即時通知）の有料プランは準備中です。ご登録のメールに先行案内をお送りします。お問い合わせの方は、確認のうえご連絡します。</p>
 <p>それまでの間は<a href="/contract/">継続契約データベース</a>・<a href="/price/">落札相場</a>・<a href="/shindan/">入札機会診断</a>をご活用ください。</p>
-<script>(function(){document.cookie='nc_member=1; max-age=31536000; path=/; SameSite=Lax';var b=null;try{b=sessionStorage.getItem('nc_back')}catch(e){}if(b&&/^\//.test(b)){document.getElementById('backp').innerHTML='<a class="btn" href="'+b.replace(/"/g,'')+'">元のページに戻って続きを見る</a>';}})();</script>`,
+<p class="meta" style="text-align:center">この端末では24時間、仮会員として続きが見られます。届いたメールの「会員を有効にする」リンクを開くと、1年間有効になります（別の端末でもそのリンクで開けます）。</p>
+<script>(function(){document.cookie='nc_m=1; max-age=86400; path=/; SameSite=Lax';var b=null;try{b=sessionStorage.getItem('nc_back')}catch(e){}if(b&&/^\//.test(b)){document.getElementById('backp').innerHTML='<a class="btn" href="'+b.replace(/"/g,'')+'">元のページに戻って続きを見る</a>';}})();</script>`,
 });
 
 // 自治体ページ（落札データのある県 ∪ 公告のある全国47県）
@@ -1267,9 +1280,18 @@ page('/about/', {
 <p>本サービスは官公需情報ポータルサイトのAPIを利用しています: <a href="https://www.kkj.go.jp/s/" rel="noopener">官公需情報ポータルサイト</a></p>`,
 });
 page('/policy/', {
-  title: `掲載ポリシー・削除依頼 | ${SITE}`,
-  desc: '掲載情報の方針と訂正・削除依頼の窓口。',
-  body: `<h1>掲載ポリシー・削除依頼</h1>
+  title: `掲載ポリシー・会員規約・プライバシー・削除依頼 | ${SITE}`,
+  desc: '掲載情報の方針、無料会員の規約とメールアドレスの取り扱い、訂正・削除依頼の窓口。',
+  body: `<h1>掲載ポリシー・会員規約・プライバシー</h1>
+<h2>無料会員について</h2>
+<ul>
+<li><b>内容</b>: メールアドレスの登録により、歴代の落札金額・前回比・契約ごとの中央値・類似案件検索の全期間など、非会員には伏せている情報が表示されます。無料です</li>
+<li><b>メールの利用目的</b>: 会員機能の有効化リンクの送付、月1回の入札機会レポート、サービスの案内（有料プランの先行案内を含む）。これ以外の目的に使用せず、第三者に提供しません。配信はアスメル（メール配信サービス）を通じて行います</li>
+<li><b>cookie</b>: 会員であることを記録するため、端末にcookie（nc_m / nc_s）を保存します。個人を特定する情報は含みません。cookieを削除すると非会員表示に戻ります</li>
+<li><b>配信停止・退会</b>: 各メールの配信停止リンク、または下のフォームからいつでもできます</li>
+<li><b>免責</b>: 掲載データは公表情報の構造化であり、正確性・完全性を保証しません。「勝てる札」推定レンジ等の導出値は参考情報であり、入札の結果について責任を負いません</li>
+</ul>
+<h2>掲載ポリシー</h2>
 <p>掲載している落札実績は、国の機関が公表した公開情報（調達ポータル 落札実績オープンデータ等）をそのまま構造化したものです。</p>
 <p>掲載内容の誤り、法人情報の訂正・削除のご依頼は、以下のフォームからお送りください。公表元データを確認のうえ対応します。</p>
 <form name="contact" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
@@ -1299,7 +1321,7 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 // 3層ゲートのクライアント（cookie nc_member=1 で無料会員分を復元）
 writeFileSync(join(DIST, 'assets', 'gate.js'), `(function(){
 'use strict';
-var member=/(^|; )nc_member=1/.test(document.cookie);
+var member=/(^|; )nc_m=1/.test(document.cookie)||/(^|; )nc_member=1/.test(document.cookie);
 function dec(b){try{return decodeURIComponent(escape(atob(b)))}catch(e){return ''}}
 function back(){return encodeURIComponent(location.pathname+location.search)}
 document.addEventListener('DOMContentLoaded',function(){
