@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: '0 20 * * *'   # 20:00 UTC = 5:00 JST（6:00の本ビルド前に完了させる）
   workflow_dispatch:
+permissions:
+  contents: write   # スナップショットのcommit/pushに必要（既定のGITHUB_TOKENは読み取りのみ）
 jobs:
   fetch:
     runs-on: ubuntu-latest

@@ -31,6 +31,7 @@ const median = (arr) => { const a = [...arr].sort((x, y) => x - y); return a.len
 // gP(): 有料（ウォッチ会員）限定。実値は出さず、桁だけ見せる伏字（teaseYen）で「答えの存在」を示す。
 const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
 const gM = (html, plain) => `<span class="g g-m" data-v="${b64(html)}" title="無料会員登録して続きを見る">${plain ?? '●●●'}</span>`;
+const ymLabel = (d) => { const m = /^(\d{4})-(\d{2})/.exec(d || ''); return m ? `${m[1]}年${Number(m[2])}月` : '最新'; };
 const teaseYen = (n) => { // 591万円→5●●万円 / 1,234万円→1,●●●万円 / 2.3億円→2.●億円
   if (!(n > 0)) return '●●●万円';
   if (n >= 1e8) { const v = (n / 1e8).toFixed(1); return `${v[0]}${v.length > 3 ? '●' : ''}.●億円`; }
@@ -839,12 +840,12 @@ ${cl.slice(0, 8).map((x, i) => `<tr><td>${x.award_date}</td><td>${x.corporate_no
   }
 
   page(`/company/${corpNo}/`, {
-    title: `${name}の落札実績・入札情報【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
-    desc: `${name}の法人番号は${corpNo}。${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
+    title: `${name}の入札結果・落札実績【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
+    desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${corpNo}）。${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
     lastmod: list[0]?.award_date,
     jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: corpNo, url: `${ORIGIN}/company/${corpNo}/` }, faqLd],
-    body: `<h1>${esc(name)}の落札実績</h1>
+    body: `<h1>${esc(name)}の入札結果・落札実績</h1>
 <p class="meta">法人番号 ${corpNo}。調達ポータル公表の落札実績オープンデータに基づく。</p>
 ${kunSays(esc(summary) + (histories.length ? ` 複数年くり返し発注されている継続契約${histories.length}件に関わっているよ（下に履歴と次回公告の目安があるよ）。` : ''), 'normal')}
 ${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', yen(total)], ['直近の落札', list[0].award_date]])}
@@ -1044,17 +1045,17 @@ ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
   }
 
   const title = hasAwards
-    ? `${prefName}・県内市町村の入札結果・入札情報【落札${plist.length.toLocaleString()}件】｜${SITE}`
+    ? `${prefName}の入札結果・入札情報【${ymLabel(plist[0]?.open_date)}更新・県と市町村の落札${plist.length.toLocaleString()}件】｜${SITE}`
     : `${prefName}の入札情報・公告一覧【公告中${nlist.length.toLocaleString()}件】｜${SITE}`;
   const desc = hasAwards
-    ? `${prefName}と県内市町村の入札結果を横断収録（落札${plist.length.toLocaleString()}件・毎日更新）。直近の公告${nlist.length}件、機関別の落札件数、落札企業、直近の落札案件を公開。`
+    ? `${prefName}と県内市町村の入札結果（落札者・落札金額）を${ymLabel(plist[0]?.open_date)}分まで${plist.length.toLocaleString()}件横断収録、毎日更新。直近の公告${nlist.length}件、機関別の落札件数、落札企業、直近の落札案件を公開。`
     : `${prefName}で直近35日間に公告された入札案件${nlist.length.toLocaleString()}件を毎日更新で掲載。発注機関・案件名・区分・公告原文へのリンクをまとめています。`;
 
   page(`/local/${pslug}/`, {
     title, desc,
     crumb: [['自治体の入札結果', '/local/'], [prefName, '']],
     lastmod: hasAwards ? plist[0]?.open_date : (nlist[0]?.issue_date || BUILT_AT),
-    body: `<h1>${prefName}の入札情報${hasAwards ? '・入札結果' : ''}</h1>
+    body: `<h1>${hasAwards ? `${prefName}の入札結果・入札情報` : `${prefName}の入札情報`}</h1>
 ${kunSays(hasAwards
     ? `${prefName}域の入札結果を<b>${plist.length.toLocaleString()}件</b>収録（県+市町村を横断）。直近の公告は<b>${nlist.length.toLocaleString()}件</b>あるよ!`
     : `${prefName}で直近に公告された入札案件は<b>${nlist.length.toLocaleString()}件</b>だよ。毎日更新しているよ!`)}
@@ -1098,15 +1099,15 @@ ${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
 
     page(`/local/${pslug}/${city}/`, {
       title: hasA
-        ? `${city}の入札結果・落札情報【${olist.length.toLocaleString()}件】｜${SITE}`
+        ? `${city}の入札結果【${ymLabel(olist[0]?.open_date)}更新・${olist.length.toLocaleString()}件】落札者と落札金額の一覧｜${SITE}`
         : `${city}の入札情報・入札公告【直近${ownNotices.length}件】｜${SITE}`,
       desc: hasA
-        ? `${city}が発注した入札の落札結果を${olist.length.toLocaleString()}件収録（毎日更新）。落札価格の中央値${yen(median(amounts))}、業務分野・落札企業・直近の落札案件と、直近の入札公告を公開。`
+        ? `${city}の入札結果（落札者・落札金額）を${ymLabel(olist[0]?.open_date)}分まで${olist.length.toLocaleString()}件収録、毎日更新。落札価格の中央値${yen(median(amounts))}、発注の多い業務、落札の多い企業、直近の入札公告を公開。`
         : `${city}が発注した直近の入札公告${ownNotices.length}件を毎日更新で掲載。案件名・区分・公告原文へのリンクに加え、市内の国の機関等の案件${natNotices.length}件もまとめています。`,
       crumb: [['自治体の入札結果', '/local/'], [prefName, `/local/${pslug}/`], [city, '']],
       lastmod: hasA ? olist[0]?.open_date : (cnotices[0]?.issue_date || BUILT_AT),
       jsonld: hasA ? { '@context': 'https://schema.org', '@type': 'Dataset', name: `${city}の落札実績データ`, description: `${city}の入札結果${olist.length}件`, creator: { '@type': 'Organization', name: SITE } } : null,
-      body: `<h1>${city}の入札情報${hasA ? '・入札結果' : ''}</h1>
+      body: `<h1>${hasA ? `${city}の入札結果・入札情報` : `${city}の入札情報`}</h1>
 ${kunSays(hasA
     ? `${city}の入札結果を<b>${olist.length.toLocaleString()}件</b>収録。落札価格の中央値は<b>${yen(median(amounts))}</b>だよ${ownNotices.length ? `。直近の公告は<b>${ownNotices.length}件</b>あるよ!` : ''}`
     : `${city}が発注した直近の入札公告は<b>${ownNotices.length}件</b>だよ。毎日更新しているよ!`)}

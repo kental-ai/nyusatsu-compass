@@ -80,6 +80,12 @@ async function fetchYear(nendo) {
   const total = Number(hidden(first, 'resultCnt')) || 0;
   const pages = Number(hidden(first, 'hiddentotalpages')) || 1;
   const rows = parseRows(first);
+  if (!total && !rows.length) {
+    // 0件のときは応答の素性を残す（海外IP遮断・メンテ画面・セッション不成立の切り分け用）
+    console.log(`  [debug] jsessionid=${js ? 'あり' : 'なし'} top=${top.length}B first=${first.length}B`);
+    console.log(`  [debug] top: ${strip(top).slice(0, 160)}`);
+    console.log(`  [debug] first: ${strip(first).slice(0, 240)}`);
+  }
   for (let p = 2; p <= pages; p++) {
     const html = await req(`/ecydeen/do/PPI/keiyakuTurn${sfx}`,
       { ...SEARCH_BASE, nendo: String(nendo), displayNum: '100', resultCnt: String(total), hiddentotalpages: String(pages), curPage: String(p) });
