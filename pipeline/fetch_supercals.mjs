@@ -19,7 +19,18 @@ export const INSTANCES = {
   ishikawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '石川県', kikan: '1700000' },
   okinawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '沖縄県', kikan: '4700000' },
   // 愛媛: 2026-08-23時点で保留。8列型だが一部の行で案件名セルが分割され列がずれる（原因未特定）。
-  //       原因を特定するまで本番投入しない。 ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県' },
+  //       2026-08-24: ヘッダー列数ガードで検証中。 
+  ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県', caseNoOrg: true },
+};
+
+// 愛媛は一覧の見出しに団体名が出ず部局名から始まるため、案件名の先頭にある
+// 調達案件番号の上5桁（JIS X 0402の団体コード）から発注機関を復元する。
+// 20コードすべてが愛媛県の11市9町と一致し、見出しに団体名が出る4町（砥部・伊方・松野・鬼北）で照合済み。
+const EHIME_JIS = {
+  38000: '愛媛県', 38201: '松山市', 38202: '今治市', 38203: '宇和島市', 38204: '八幡浜市',
+  38205: '新居浜市', 38206: '西条市', 38207: '大洲市', 38210: '伊予市', 38213: '四国中央市',
+  38214: '西予市', 38215: '東温市', 38356: '上島町', 38386: '久万高原町', 38401: '松前町',
+  38402: '砥部町', 38422: '内子町', 38442: '伊方町', 38484: '松野町', 38488: '鬼北町', 38506: '愛南町',
 };
 
 const slug = process.argv[2] || 'chiba';
@@ -103,10 +114,15 @@ function parseList(html) {
     if (!winner && !amount) continue; // 入札中止・結果未確定の行
     // 見出しの先頭語が団体名でない（部局名から始まる=単一機関スコープ）なら県名を機関名にする
     const head = currentOrg.split(/\s+/)[0] || '';
+    let org = /(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref;
+    let name = (cells[m.name] || '').replace(/※添付有/, '').trim();
+    if (INST.caseNoOrg) { // 案件名の先頭の調達案件番号（20桁以上）＝上5桁が団体コード
+      const cm = name.match(/^(\d{5})\d{15,}\s*/);
+      if (cm) { org = EHIME_JIS[Number(cm[1])] || org; name = name.slice(cm[0].length); }
+    }
     rows.push({
-      org: /(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref,
-      dept: currentOrg,
-      open_date: waDate(cells[m.date]), name: (cells[m.name] || '').replace(/※添付有/, '').trim(),
+      org, dept: currentOrg,
+      open_date: waDate(cells[m.date]), name,
       category: m.category >= 0 ? cells[m.category] : '', method: m.method >= 0 ? cells[m.method] : '',
       winner, corp_no: corpNo, amount,
     });
