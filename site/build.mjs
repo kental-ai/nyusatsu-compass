@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { TAXONOMY } from '../pipeline/taxonomy.mjs';
 import { MINISTRIES, BIDDING_METHODS } from '../pipeline/codes.mjs';
+import { GUIDES } from './guides.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'site', 'dist');
@@ -252,7 +253,7 @@ ${body}
 </main>
 <footer><div class="in">
 <p>${SITE} — 官公庁入札の落札相場・落札実績データベース。データ出典: 調達ポータル「落札実績オープンデータ」（政府標準利用規約準拠）ほか公的公表情報。最終更新: ${BUILT_AT}</p>
-<p><a href="/price/">落札相場</a> ／ <a href="/company/">落札企業</a> ／ <a href="/organ/">発注機関</a> ／ <a href="/local/">地域別</a> ／ <a href="/contract/">継続契約</a> ／ <a href="/radar/">満了レーダー</a> ／ <a href="/weekly/">週間レポート</a> ／ <a href="/shindan/">入札機会診断</a></p>
+<p><a href="/price/">落札相場</a> ／ <a href="/company/">落札企業</a> ／ <a href="/organ/">発注機関</a> ／ <a href="/local/">地域別</a> ／ <a href="/contract/">継続契約</a> ／ <a href="/radar/">満了レーダー</a> ／ <a href="/weekly/">週間レポート</a> ／ <a href="/shindan/">入札機会診断</a> ／ <a href="/guide/">入札ガイド</a></p>
 <p><a href="/about/">運営者情報・データについて</a> ／ <a href="/policy/">掲載ポリシー・削除依頼</a></p>
 </div></footer>
 </body></html>`;
@@ -578,6 +579,47 @@ if (radarCount) {
 ${kunSays('毎年くり返される契約の「次はいつ公告されるか」を、過去の落札周期から予測しているよ。入札の準備を先回りできる、入札コンパスだけのデータだよ!')}
 <p>官公庁の継続契約について、過去の落札周期から次回公告時期を予測しています。業務分野を選んでください。</p>
 <ul>${radarSlugs.map((s) => `<li><a href="/radar/${s}/">${LABEL[s]}の次回公告カレンダー</a>（${radarBySlug.get(s).length.toLocaleString()}件）</li>`).join('')}</ul>`,
+  });
+}
+
+// 入札ガイド（初心者のペインに答える入口。実データで数値を埋め、道具へ誘導する）
+{
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const lowestOf = (slug) => { const l = byCat.get(slug) || []; return pct(l.filter((a) => ['8002010', '8003010'].includes(a.method_code)).length, l.length); };
+  const smallCos = [...byCompany.values()].filter((l) => l.length >= 1 && l.length <= 4).length;
+  const prefCount = new Map(); for (const n of NOTICES) if (n.pref) prefCount.set(n.pref, (prefCount.get(n.pref) || 0) + 1);
+  const topPref = [...prefCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  const kojiLocal = LOCALS.filter((a) => a.slug === 'koji').length;
+  const stats = {
+    awards: AWARDS.length.toLocaleString(), notices: NOTICES.length.toLocaleString(),
+    topNoticePref: topPref ? `${topPref[0]}（${topPref[1].toLocaleString()}件）` : '東京都',
+    seisoLowestPct: lowestOf('seiso'), keibiLowestPct: lowestOf('keibi'),
+    seisoCount: (byCat.get('seiso') || []).length.toLocaleString(),
+    companies: byCompany.size.toLocaleString(), smallSharePct: pct(smallCos, byCompany.size),
+    kojiLocalPct: pct(kojiLocal, LOCALS.length || 1), contracts: contractCount.toLocaleString(),
+    localAwards: LOCALS.length.toLocaleString(),
+  };
+  for (const g of GUIDES) {
+    page(`/guide/${g.slug}/`, {
+      title: `${g.title}｜${SITE}`,
+      desc: g.desc,
+      crumb: [['入札ガイド', '/guide/'], [g.title.split(' — ')[0], '']],
+      lastmod: BUILT_AT,
+      jsonld: { '@context': 'https://schema.org', '@type': 'Article', headline: g.title, description: g.desc,
+        author: { '@type': 'Organization', name: SITE }, publisher: { '@type': 'Organization', name: SITE }, dateModified: BUILT_AT },
+      body: `<h1>${esc(g.title)}</h1>
+${kunSays('このガイドの数字は、当サイトが毎日更新している実データから自動で埋めているよ。読みながら道具のページへ飛べるようにしてあるよ!')}
+${g.body(stats)}
+<h2>関連ガイド</h2><ul>${GUIDES.filter((x) => x.slug !== g.slug).map((x) => `<li><a href="/guide/${x.slug}/">${esc(x.title.split(' — ')[0])}</a></li>`).join('')}</ul>`,
+    });
+  }
+  page('/guide/', {
+    title: `官公庁入札のはじめ方ガイド — 資格・案件探し・相場・電子入札・結果の調べ方 | ${SITE}`,
+    desc: '官公庁・自治体の入札に初めて参加する中小企業向けガイド。参加資格と等級、案件の探し方、落札相場の調べ方、電子入札の準備、入札結果の調べ方を実データつきで解説。',
+    crumb: [['入札ガイド', '']],
+    body: `<h1>官公庁入札のはじめ方ガイド</h1>
+${kunSays('はじめて入札する人が詰まるところを、順番に解説しているよ。数字は全部、当サイトの実データだよ!')}
+<ul>${GUIDES.map((x) => `<li><a href="/guide/${x.slug}/"><b>${esc(x.title.split(' — ')[0])}</b></a><br><span class="meta">${esc(x.desc)}</span></li>`).join('')}</ul>`,
   });
 }
 
@@ -1126,7 +1168,7 @@ ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録�
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
-<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a> ／ <a href="/contract/">→ 継続契約DB</a> ／ <a href="/radar/">→ 満了レーダー</a> ／ <a href="/weekly/">→ 週間レポート</a>${LOCALS.length ? ` ／ <a href="/local/">→ 自治体の入札結果</a>` : ''}</p>`,
+<p><a href="/price/">→ すべての業務分類を見る</a> ／ <a href="/company/">→ 落札企業データベース</a> ／ <a href="/organ/">→ 発注機関別</a> ／ <a href="/guide/">→ 入札のはじめ方ガイド</a> ／ <a href="/contract/">→ 継続契約DB</a> ／ <a href="/radar/">→ 満了レーダー</a> ／ <a href="/weekly/">→ 週間レポート</a>${LOCALS.length ? ` ／ <a href="/local/">→ 自治体の入札結果</a>` : ''}</p>`,
 });
 
 // 類似案件検索エンジン（全相場ページ共通・キャッシュされる）
