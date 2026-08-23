@@ -9,6 +9,8 @@
 - 静的生成: site/build.mjs → site/dist。ビルドはGitHub Actionsで実行、Netlifyへはdist配信のみ
 - データは data/*.db（gitignore）。一次ソースから毎日再取得可能な設計にする
 - コミット作者は hojokin-dev。実名・個人情報を書かない。区切りごとに日本語メッセージで自動コミット
+- **コスト規律**: Maxプラン内で完結させる。分類等にAnthropic APIなど従量課金を使う前に、件数×単価で見積もって承認を得る。
+  現状はすべてルールベース・無料枠（Netlify/GitHub）で従量課金ゼロ
 
 ## データソースとコンプライアンス
 
