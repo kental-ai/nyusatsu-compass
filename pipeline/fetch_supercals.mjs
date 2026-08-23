@@ -7,10 +7,17 @@ import { openDb } from './db.mjs';
 import { classify } from './taxonomy.mjs';
 
 // 採用県のインスタンス表（偵察で3手プロトコル実証済みのものだけ追加する）
+// kikan を持つものは富士通の共有ホスト（ep-bis.supercals.jp）に相乗りしており、
+// KikanNO（先頭2桁=JIS都道府県コード）でテナントを指定しないと検索できない。
 export const INSTANCES = {
   chiba: { base: 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '千葉県' },
   shizuoka: { base: 'https://www.ppi.cals-shiz.jp/ebidPPIPublish/EjPPIj', pref: '静岡県' }, // 2024年度〜・法人番号あり・県+市町村
   miyazaki: { base: 'https://www.e-nyusatsu-joho.pref.miyazaki.lg.jp/ebidPPIPublish/EjPPIj', pref: '宮崎県' }, // 法人番号あり・14機関
+  // 2026-08-24 に平日プローブで実証（いずれも法人番号なし・2025年度〜の保持）
+  niigata: { base: 'https://www.ep-bis.pref.niigata.jp/ebidPPIPublish/EjPPIj', pref: '新潟県' },
+  tochigi: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '栃木県', kikan: '0900000' },
+  ishikawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '石川県', kikan: '1700000' },
+  okinawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '沖縄県', kikan: '4700000' },
   // 愛媛: 2026-08-23時点で保留。8列型だが一部の行で案件名セルが分割され列がずれる（原因未特定）。
   //       原因を特定するまで本番投入しない。 ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県' },
 };
@@ -49,35 +56,62 @@ async function req(body = null) {
   return { status: res.status, text: sjis.decode(buf) };
 }
 
-const waDate = (s) => { // 'R07-07-01' / '令和07/06/05' / 'R07/06/05' → '2025-07-01'
-  const m = s.match(/(?:R|令和)\s?(\d{1,2})[-/年]\s?(\d{1,2})[-/月]\s?(\d{1,2})/);
+const waDate = (s) => { // 'R07-07-01' / '令和07/06/05' / 'R07/06/05' / 'R08.07.15' → '2025-07-01'
+  const m = s.match(/(?:R|令和)\s?(\d{1,2})[-/.年]\s?(\d{1,2})[-/.月]\s?(\d{1,2})/);
   if (!m) return '';
   const p2 = (x) => String(x).padStart(2, '0');
   return `${2018 + Number(m[1])}-${p2(m[2])}-${p2(m[3])}`;
 };
 const strip = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&nbsp;?/g, ' ').replace(/\s+/g, ' ').trim();
 
+// 一覧のヘッダー行から列位置を決める。列数だけで判別すると、9列でも
+// 「入札方法」が中間に挟まる型（静岡）と「更新日」が末尾に付く型（石川・沖縄）を取り違える。
+function headerMap(cells) {
+  const at = (re) => cells.findIndex((c) => re.test(c));
+  const m = {
+    date: at(/開札/), name: at(/名称|案件名/), winner: at(/落札者|受注者|契約者/),
+    amount: at(/落札決定金額|落札金額|契約金額|金額/), method: at(/入札方式|契約方式/), category: at(/調達|区分/),
+  };
+  if (m.date < 0 || m.name < 0 || m.winner < 0 || m.amount < 0) return null;
+  m.n = cells.length;
+  return m;
+}
+const FALLBACK = (n) => { // ヘッダー行を出さないインスタンス（宮崎）向けの従来ヒューリスティック
+  const off = n >= 9 ? 1 : 0;
+  return { date: 1, name: 2, category: 3, method: 4, winner: 5 + off, amount: 6 + off, n };
+};
+
 function parseList(html) {
   const total = Number((html.match(/条件に合致したものを([\d,]+)件/) || [])[1]?.replaceAll(',', '') ?? -1);
   const over = /700件以内|条件を設定/.test(html) && total < 0;
   const rows = [];
   let currentOrg = '';
+  let map = null;
+  let skipped = 0;
   for (const tr of html.match(/<TR[^>]*>[\s\S]*?<\/TR>/gi) || []) {
     const cells = [...tr.matchAll(/<T[DH][^>]*>([\s\S]*?)<\/T[DH]>/gi)].map((m) => strip(m[1]));
     if (cells.length === 1 && /令和|平成/.test(cells[0])) { currentOrg = cells[0].replace(/令和\d+年度|平成\d+年度/, '').trim(); continue; }
-    if (cells.length < 7 || cells[0] === 'No' || !/^\d+$/.test(cells[0])) continue;
-    const off = cells.length >= 9 ? 1 : 0; // 静岡型は「入札方法(紙/電子)」列が1本挟まる9列構成
-    const wcell = cells[5 + off] || '';
+    if (cells[0] === 'No') { map = headerMap(cells) || map; continue; }
+    if (cells.length < 7 || !/^\d+$/.test(cells[0] || '')) continue;
+    const m = map && map.n === cells.length ? map : (map ? null : FALLBACK(cells.length));
+    if (!m) { skipped++; continue; } // ヘッダーと列数が違う行＝セル分割による列ズレ。載せない
+    const wcell = cells[m.winner] || '';
     const corpNo = (wcell.match(/法人番号\s*(\d{13})/) || [])[1] || '';
+    // 栃木等は落札者名が固定長26字に全角空白でパディングされ、末尾に表示用の「…」が付く（実名は完全）
+    const winner = wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').replace(/[\s　]*…+\s*$/, '').trim();
+    const amount = Number(((cells[m.amount] || '').match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0);
+    if (!winner && !amount) continue; // 入札中止・結果未確定の行
+    // 見出しの先頭語が団体名でない（部局名から始まる=単一機関スコープ）なら県名を機関名にする
+    const head = currentOrg.split(/\s+/)[0] || '';
     rows.push({
-      org: currentOrg.split(/\s+/)[0] || '', dept: currentOrg,
-      open_date: waDate(cells[1]), name: cells[2].replace(/※添付有/, '').trim(),
-      category: cells[3], method: cells[4],
-      winner: wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').trim(), corp_no: corpNo,
-      amount: Number(((cells[6 + off] || '').match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0),
+      org: /(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref,
+      dept: currentOrg,
+      open_date: waDate(cells[m.date]), name: (cells[m.name] || '').replace(/※添付有/, '').trim(),
+      category: m.category >= 0 ? cells[m.category] : '', method: m.method >= 0 ? cells[m.method] : '',
+      winner, corp_no: corpNo, amount,
     });
   }
-  return { total, over, rows };
+  return { total, over, rows, skipped };
 }
 
 async function search(nendo, kikan, extra = {}, stpos = 0) {
@@ -91,14 +125,17 @@ async function search(nendo, kikan, extra = {}, stpos = 0) {
   return parseList(text);
 }
 
+let skippedRows = 0;
+
 async function collectKikan(nendo, kikan, range = null) {
   const first = await search(nendo, kikan, range || {});
+  skippedRows += first.skipped || 0;
   if (first.over || first.total > 500) {
     // 開札日範囲の二分割（年度: 4/1〜翌3/31）
     const y = Number(nendo);
     const lo = range?.from || `${y}/04/01`, hi = range?.to || `${y + 1}/03/31`;
     const [ld, hd] = [new Date(lo.replaceAll('/', '-')), new Date(hi.replaceAll('/', '-'))];
-    if (hd - ld < 86400000 * 20) { console.error(`  分割限界: ${kikan} ${lo}〜${hi}`); return first.rows; }
+    if (hd - ld < 86400000 * 1.5) { console.error(`  分割限界(1日で500件超): ${kikan} ${lo}〜${hi}`); return first.rows; }
     const mid = new Date((ld.getTime() + hd.getTime()) / 2);
     const midS = mid.toISOString().slice(0, 10).replaceAll('-', '/');
     const midN = new Date(mid.getTime() + 86400000).toISOString().slice(0, 10).replaceAll('-', '/');
@@ -110,7 +147,8 @@ async function collectKikan(nendo, kikan, range = null) {
 
 // ---- main ----
 const nendo = process.argv[3] || String(new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1);
-const kikansArg = process.argv[4] ?? 'all'; // 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）
+// 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）。共有ホスト勢は INSTANCES.kikan が既定値
+const kikansArg = process.argv[4] ?? (INST.kikan ? INST.kikan : 'all');
 
 const db = openDb();
 db.exec(`
@@ -136,7 +174,7 @@ db.exec(`
 
 // セッション確立（GET → StartPage）
 await req();
-await req({ ejParameterID: 'StartPage', KikanNO: 'null' });
+await req({ ejParameterID: 'StartPage', KikanNO: INST.kikan || 'null' });
 
 const kikans = kikansArg === 'all' ? [''] : kikansArg.split(',');
 const now = new Date().toISOString();
@@ -158,4 +196,4 @@ for (const k of kikans) {
   console.log(`KikanNO=${k}: 取得${rows.length}行 → 新規${n}件`);
 }
 const c = db.prepare(`SELECT COUNT(*) c, COUNT(DISTINCT corporate_no) k FROM local_awards WHERE src = '${slug}'`).get();
-console.log(`合計[${slug}]: 新規${grand}件 / 累計${c.c}件・法人番号ユニーク${c.k} / リクエスト${requestCount}回`);
+console.log(`合計[${slug}]: 新規${grand}件 / 累計${c.c}件・法人番号ユニーク${c.k} / リクエスト${requestCount}回 / 列ズレ除外${skippedRows}行`);
