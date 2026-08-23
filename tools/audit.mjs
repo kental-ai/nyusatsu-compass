@@ -54,6 +54,18 @@ await check('週間レポートの鮮度', async () => {
   if (ageDays > 21) throw new Error(`最新週報が${Math.round(ageDays)}日前 — 日次ビルドが止まっている可能性`);
   return `最新 ${m[1]}`;
 });
+await check('自治体データの鮮度（県ページのtitleから）', async () => {
+  // 2026-08-23の事故（日次ワークフローのpush失敗・秋田の時間外取得）を二度と見逃さないための監視
+  const stale = [];
+  for (const [slug, name] of [['chiba', '千葉'], ['akita', '秋田'], ['shizuoka', '静岡'], ['miyazaki', '宮崎']]) {
+    const html = await (await get(`${ORIGIN}/local/${slug}/`)).text();
+    const m = html.match(/<title>[^<]*?(\d{4})年(\d{1,2})月更新/);
+    if (!m) { stale.push(`${name}: 更新年月が取れない`); continue; }
+    const ageDays = (Date.now() - new Date(`${m[1]}-${m[2].padStart(2, '0')}-01`).getTime()) / 86400000;
+    if (ageDays > 60) stale.push(`${name}: ${m[1]}年${m[2]}月（約${Math.round(ageDays)}日前）`);
+  }
+  if (stale.length) throw new Error(stale.join(' / ') + ' — daily-local-awards の失敗か取得先の時間外を疑う');
+});
 await check('GEPS差分エンドポイント', async () => {
   const d = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10).replaceAll('-', '');
   const r = await get(`https://api.p-portal.go.jp/pps-web-biz/UAB03/OAB0301?fileversion=v001&filename=successful_bid_record_info_diff_${d}.zip`);

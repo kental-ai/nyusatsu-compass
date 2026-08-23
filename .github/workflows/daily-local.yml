@@ -4,7 +4,7 @@
 name: daily-local-awards
 on:
   schedule:
-    - cron: '0 20 * * *'   # 20:00 UTC = 5:00 JST（6:00の本ビルド前に完了させる）
+    - cron: '0 22 * * *'   # 22:00 UTC = 7:00 JST（秋田cals05の稼働時間は7:00〜24:00 JST。8:00の本ビルド前に完了させる）
   workflow_dispatch:
 permissions:
   contents: write   # スナップショットのcommit/pushに必要（既定のGITHUB_TOKENは読み取りのみ）
@@ -33,5 +33,5 @@ jobs:
           git config user.email "hojokin-dev@users.noreply.github.com"
           git add data/snapshots/
           git diff --cached --quiet && echo "変更なし" && exit 0
-          git commit -m "自治体データ日次スナップショット更新"
+          git commit -m "自治体データ日次スナップショット更新 [skip netlify]"   # Netlifyの自動ビルドは抑止し、8:00の本ビルドに乗せる（1日1ビルド）
           git push

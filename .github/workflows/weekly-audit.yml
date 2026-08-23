@@ -3,7 +3,7 @@
 name: weekly-audit
 on:
   schedule:
-    - cron: '30 22 * * 0'   # 毎週月曜 7:30 JST（日次ビルド6:00の後）
+    - cron: '0 1 * * 1'   # 毎週月曜 10:00 JST（日次ビルド8:00の後）
   workflow_dispatch:
 jobs:
   audit:
