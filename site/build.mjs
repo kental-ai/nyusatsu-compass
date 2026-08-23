@@ -306,6 +306,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="msvalidate.01" content="AB03214349E5D12EC85FE63B4AA928C6">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
@@ -1456,6 +1457,7 @@ scat.addEventListener('change',render);spref.addEventListener('change',render);
 writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 // Search Console所有権確認 + IndexNowキー（公開仕様）
 writeFileSync(join(DIST, 'googlea7352c9a5da5cbc1.html'), 'google-site-verification: googlea7352c9a5da5cbc1.html');
+writeFileSync(join(DIST, 'BingSiteAuth.xml'), ['<?xml version="1.0"?>', '<users>', '  <user>AB03214349E5D12EC85FE63B4AA928C6</user>', '</users>', ''].join('\n')); // Bing Webmaster Tools 所有権確認
 writeFileSync(join(DIST, '68c8ff01b5ee8614e56c3a91ccbb8f59.txt'), '68c8ff01b5ee8614e56c3a91ccbb8f59');
 writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}（nyusatsu-compass.com）
 
