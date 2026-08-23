@@ -115,6 +115,34 @@ for (const [key, arr] of clusters) {
     ministry: last.ministry_code, slug: last.slug, name: last.name });
 }
 const contractIdByKey = new Map([...CONTRACTS].map(([id, c]) => [c.key, id]));
+// 分野別の「入れ替わり率」: 年をまたいで繰り返された契約のうち落札者が変わった割合（参入者を動かす反証データ）
+const TURNOVER = {}; // slug → { pairs, flips, firstTermShare }
+{
+  const firstTerm = {}; // slug → [契約数, 現職1回目の契約数]
+  for (const [, arr] of clusters) {
+    const s = [...arr].filter((a) => a.corporate_no).sort((x, y) => (x.award_date < y.award_date ? -1 : 1));
+    if (new Set(s.map((a) => a.award_date.slice(0, 4))).size < 2) continue;
+    for (let i = 1; i < s.length; i++) {
+      if (s[i].award_date.slice(0, 4) === s[i - 1].award_date.slice(0, 4)) continue;
+      const sl = s[i].slug || 'other';
+      const o = TURNOVER[sl] ?? (TURNOVER[sl] = { pairs: 0, flips: 0 });
+      o.pairs++; if (s[i].corporate_no !== s[i - 1].corporate_no) o.flips++;
+    }
+    if (s.length >= 3) {
+      const sl = s[s.length - 1].slug || 'other';
+      const f = firstTerm[sl] ?? (firstTerm[sl] = [0, 0]);
+      f[0]++; if (s[s.length - 1].corporate_no !== s[s.length - 2].corporate_no) f[1]++;
+    }
+  }
+  for (const sl of Object.keys(TURNOVER)) {
+    const f = firstTerm[sl] || [0, 0];
+    TURNOVER[sl].rate = TURNOVER[sl].pairs ? Math.round((TURNOVER[sl].flips / TURNOVER[sl].pairs) * 100) : null;
+    TURNOVER[sl].firstTermShare = f[0] ? Math.round((f[1] / f[0]) * 100) : null;
+  }
+}
+const allPairs = Object.values(TURNOVER).reduce((s, o) => s + o.pairs, 0);
+const allFlips = Object.values(TURNOVER).reduce((s, o) => s + o.flips, 0);
+const TURNOVER_ALL = allPairs ? Math.round((allFlips / allPairs) * 100) : 0;
 const contractLink = (key, label) => { const id = contractIdByKey.get(key); return id ? `<a href="/contract/${id}/">${label}</a>` : label; };
 const monthMode = (list) => {
   const m = {};
@@ -244,11 +272,11 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@700&family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 </head><body>
-<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/shindan/">10秒診断をやってみる</a></div></header>
+<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/alert/">ウォッチ登録（無料）</a></div></header>
 <main>${crumbHtml}
 ${body}
-<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">あなたの業種の官公庁市場、10秒でわかるよ!</b><br>
-年間の発注件数・相場・公告シーズン・毎年出る定番案件を、実データから無料で診断。登録不要。<br><br>
+<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">あなたの業種、毎年どれくらい入れ替わる?</b><br>
+年間の発注件数・相場・公告シーズンに加えて「毎年何%の契約で落札者が入れ替わるか」を実データから10秒で診断。登録不要。<br><br>
 <a class="btn" href="/shindan/">入札機会診断をやってみる</a></div></div>
 </main>
 <footer><div class="in">
@@ -505,15 +533,19 @@ for (const [id, c] of CONTRACTS) {
     ],
     body: `<h1>${esc(name)}の落札結果・落札履歴</h1>
 <p class="meta">発注機関: <a href="/organ/${ministry.toLowerCase()}/">${esc(mname)}</a>${slug && slug !== 'other' ? ` ／ 業務分野: <a href="/price/${slug}/">${LABEL[slug]}</a>` : ''}</p>
+<h2 style="margin-top:1em">値付けの目安（札を入れる前に）</h2>
+${statBoxes([['前回の落札額', yen(last.amount)], ['この契約の中央値', yen(med)], ['同分野・同規模帯との比較', vsBand === null ? '—' : `${vsBand > 0 ? '+' : ''}${vsBand}%`], ['例年の落札月', m ? m + '月頃' : '—'], ['前回の落札者', last.winner_name.length > 14 ? last.winner_name.slice(0, 14) + '…' : last.winner_name]])}
 ${kunSays(sentences.join(' '))}
-${statBoxes([['収録年数', years + '年分'], ['直近の落札額', yen(last.amount)], ['落札額の中央値', yen(med)], ['例年の落札月', m ? m + '月頃' : '—']])}
 <h2>落札履歴（誰が・いくらで落としてきたか）</h2>
 <div class="wrap"><table><tr><th>落札日</th><th>落札者</th><th>落札価格</th><th>前回比</th><th>入札方式</th></tr>
 ${arr.map((a, i) => { const prev = arr[i + 1]; const d = prev && prev.amount > 0 && a.amount > 0 ? Math.round((a.amount / prev.amount - 1) * 100) : null;
   return `<tr><td>${a.award_date}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td><td class="num">${d === null ? '—' : `${d > 0 ? '+' : ''}${d}%`}</td><td>${esc(BIDDING_METHODS[a.method_code] || '')}</td></tr>`; }).join('\n')}</table></div>
 <p class="meta">案件名の年度表記ゆれ（令和◯年度等）を正規化して同一契約として束ねています。別契約が混在する場合は<a href="/policy/">こちら</a>からお知らせください。</p>
+<div class="cta" style="margin:20px 0"><div class="ctxt"><b class="mk">この契約をウォッチする</b><br>
+次の公告が出たとき、落札結果が出たときにメールで知らせます（無料登録・準備中の有料プランで即時通知）。<br><br>
+<a class="btn" href="/alert/?watch=contract&id=${id}&name=${encodeURIComponent(name)}">この契約をウォッチ登録</a></div></div>
 <h2>よくある質問</h2>${faqs.map(([q, a]) => `<h3>Q. ${esc(q)}</h3><p>A. ${esc(a)}</p>`).join('\n')}
-<p>${slug && slug !== 'other' ? `<a href="/radar/${slug}/">→ ${LABEL[slug]}の次回公告カレンダーを見る</a> ／ ` : ''}<a href="/organ/${ministry.toLowerCase()}/">→ ${esc(mname)}の入札結果を見る</a></p>`,
+<p>${slug && slug !== 'other' ? `<a href="/price/${slug}/">→ ${LABEL[slug]}の相場・類似案件検索</a> ／ ` : ''}<a href="/organ/${ministry.toLowerCase()}/">→ ${esc(mname)}の入札結果を見る</a></p>`,
   });
 }
 // 機関別の契約一覧（ページネーション）+ 全体ハブ
@@ -784,6 +816,9 @@ ${(() => { const loc = byCorpLocal.get(corpNo); if (!loc?.length) return ''; con
 <div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>発注機関</th><th>金額</th></tr>
 ${loc.slice(0, 15).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>`; })()}
 <h2>直近の落札案件</h2>${awardRows(list.slice(0, RECENT_LIMIT), { company: false })}
+<div class="cta" style="margin:20px 0"><div class="ctxt"><b class="mk">この会社をウォッチする</b><br>
+${esc(name)}が新たに落札したとき（どこで・いくらで）にメールで知らせます。競合の価格帯を追うのに。<br><br>
+<a class="btn" href="/alert/?watch=company&id=${corpNo}&name=${encodeURIComponent(name)}">この会社をウォッチ登録</a></div></div>
 ${faqHtml}`,
   });
 }
@@ -874,16 +909,19 @@ page('/organ/', {
 // アラートLP（POSTはNetlify Functionで中継。hidden formはNetlify Formsの検出用）
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
 page('/alert/', {
-  title: `無料の入札新着アラート | ${SITE}`,
-  desc: '業種と地域を登録するだけで、官公庁・自治体の新着入札案件を毎朝メールでお知らせします。無料。',
-  body: `<h1>あなた向けの入札機会レポートを、月1回無料で</h1>
-<p>業種と地域を登録すると、あなたの条件の新着案件・落札相場の動き・来期の公告予測をまとめた
-<b>月次レポート</b>を無料でお届けします。毎朝の自動配信（有料プラン・準備中）の先行案内もこちらから。</p>
+  title: `ウォッチ登録 — 契約・競合・地域の結果と公告をお知らせ | ${SITE}`,
+  desc: '気になる契約・競合企業・発注機関・地域を登録すると、落札結果や公告が出たときにお知らせします。値付けの起点と結果確認を逃さないために。無料登録。',
+  body: `<h1>契約・競合・地域をウォッチする</h1>
+<p>気になる<b>契約</b>（次の公告・結果）、<b>競合企業</b>（新たな落札）、<b>発注機関・地域</b>（あなたの業種の公告・結果）を登録すると、
+動きがあったときにメールでお知らせします。まずは無料登録（月次まとめ）。即時通知の有料プラン（月9,800円・準備中）の先行案内もこちらから。</p>
+<div id="watchinfo" class="meta"></div>
+<script>(function(){var q=new URLSearchParams(location.search);var w=q.get('watch'),n=q.get('name'),id=q.get('id');if(w&&n){var lbl={contract:'契約',company:'会社',organ:'機関',local:'地域'}[w]||'対象';document.getElementById('watchinfo').innerHTML='ウォッチ対象（'+lbl+'）: <b>'+n.replace(/</g,'&lt;')+'</b>';var f=document.querySelector('input[name=watch_target]');if(f)f.value=lbl+':'+n+(id?' ['+id+']':'');}})();</script>
 ${OPEN_NOTICES.length ? `<p class="meta">いま全国で公告中の案件: <b>${OPEN_NOTICES.length.toLocaleString()}件</b>（官公需情報ポータル連携・毎日更新）</p>` : ''}
 <form name="alert" method="POST" action="/.netlify/functions/alert-form" data-netlify="true" netlify-honeypot="bot-field">
 <input type="hidden" name="form-name" value="alert">
 <p style="display:none"><label>入力しないでください: <input name="bot-field"></label></p>
 <p><label>メールアドレス<br><input type="email" name="email" required style="width:100%;max-width:400px;padding:8px"></label></p>
+<p><label>ウォッチしたい対象（契約名・会社名・機関名・地域など。任意）<br><input type="text" name="watch_target" placeholder="例: 寝具等クリーニング業務（法務省） / 株式会社◯◯ / 千葉県 清掃" style="width:100%;max-width:560px;padding:8px"></label></p>
 <p><label>業種（主な入札分野）<br><select name="category" required style="padding:8px">
 <option value="">選択してください</option>
 ${TAXONOMY.map((t) => `<option>${t.label}</option>`).join('')}
@@ -1130,7 +1168,7 @@ for (const nt of OPEN_NOTICES) {
 }
 mkdirSync(join(DIST, 'shindan'), { recursive: true });
 writeFileSync(join(DIST, 'shindan', 'data.json'),
-  JSON.stringify({ mins: MINISTRIES, cats: shindanStats, open: openBySlug, openTotal: OPEN_NOTICES.length }));
+  JSON.stringify({ mins: MINISTRIES, cats: shindanStats, open: openBySlug, openTotal: OPEN_NOTICES.length, turnover: TURNOVER, turnoverAll: TURNOVER_ALL }));
 
 page('/shindan/', {
   title: `入札機会診断 — あなたの業種の官公庁市場が10秒でわかる | ${SITE}`,
@@ -1193,10 +1231,11 @@ page('/policy/', {
 
 // トップ
 page('/', {
-  title: `${SITE}｜官公庁入札の落札相場・入札結果データベース`,
+  title: `${SITE}｜いくらで入れるか、決める前に見る。落札相場・入札結果データベース`,
   desc: `官公庁入札の落札相場と落札実績${AWARDS.length.toLocaleString()}件を無料公開。業務別の相場、企業別の落札履歴、機関別の発注傾向がわかる入札の判断支援データベース。`,
   jsonld: { '@context': 'https://schema.org', '@type': 'WebSite', name: SITE, url: ORIGIN },
-  body: `<h1>官公庁入札の落札相場・実績データベース</h1>
+  body: `<h1>いくらで入れるか、決める前に見る。</h1>
+<p>官公庁入札の落札結果${AWARDS.length.toLocaleString()}件から、この契約は前回いくらで誰が取ったか・類似案件の相場・競合の価格帯を、札を入れる前に数分で。結果が出た瞬間のお知らせも。</p>
 ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録企業', companyCount.toLocaleString() + '社'], ['収録機関', organCount + '機関'], ['データ期間', '2013年度〜']])}
 <div class="cta"><b>まずは10秒診断から。</b>業種を選ぶだけで、年間発注件数・相場・公告シーズン・毎年出る定番案件がその場でわかります。<br><br><a href="/shindan/">入札機会診断をやってみる</a></div>
 <h2>業務別の落札相場</h2>
@@ -1276,6 +1315,7 @@ function render(){
  var c=S.cats.filter(function(x){return x.slug===slug})[0];
  var op=(S.open||{})[slug];
  var openN=op?(pref?(op.byPref[pref]||0):op.n):0;
+ var tv=(S.turnover||{})[slug];
  var peak=c.months.indexOf(Math.max.apply(null,c.months))+1;
  var pubM=((peak+10-1)%12)+1; // 公告はおおむね落札の2ヶ月前
  var html='<h2>あなたの市場: '+esc(c.label)+(pref?' × '+esc(pref)+'（参考）':'（国の機関・全国）')+'</h2>'
@@ -1285,7 +1325,9 @@ function render(){
   +'<div class="stat"><b>'+esc(c.band)+'</b>最多の金額帯</div>'
   +'<div class="stat"><b>'+peak+'月</b>落札の集中月（公告は'+pubM+'月頃〜）</div>'
   +(op?'<div class="stat" style="border-color:#E8604C"><b style="color:#E8604C">'+openN.toLocaleString()+'件</b>いま開いている案件'+(pref?'（'+pref+'）':'（全国）')+'</div>':'')
+  +(tv&&tv.rate!=null?'<div class="stat"><b>'+tv.rate+'%</b>毎年入れ替わる契約の割合</div>':'')
   +'</div>'
+  +(tv&&tv.rate!=null?'<p>'+esc(c.label)+'の継続契約は<b>毎年'+tv.rate+'%で落札者が入れ替わって</b>います（全分野平均'+(S.turnoverAll||'—')+'%）'+(tv.firstTermShare!=null?'。現職が1回目（まだ固まっていない）契約が'+tv.firstTermShare+'%あり、'+(tv.rate>=40?'動きの大きい分野です。新規でも取りに行く余地があります':(tv.rate<=22?'固定的な分野です。狙うなら現職1回目の契約を':'平均的な流動性です'))+'。</p>':'')
   +'<h3>発注が多い機関</h3><ul>'+c.topMins.map(function(m){return '<li><a href="/organ/'+m[0].toLowerCase()+'/">'+esc(S.mins[m[0]]||m[0])+'</a>（'+m[1].toLocaleString()+'件）</li>'}).join('')+'</ul>'
   +(op&&op.sample.length?'<h3>いま公告中の案件（例）</h3><ul>'+op.sample.slice(0,4).map(function(x){return '<li>'+esc(x.name)+'（'+esc(x.org)+(x.deadline?'・入札 '+x.deadline:'')+'）'+(x.url?' <a href="'+x.url+'" rel="nofollow noopener" target="_blank">原文</a>':'')+'</li>'}).join('')+'</ul>':'')
   +'<div id="steiban"><p class="meta">定番案件を分析中…</p></div>'
