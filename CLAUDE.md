@@ -6,7 +6,10 @@
 ## 技術方針（ホジョナビ流儀を継承）
 
 - 外部依存ゼロ: Node組み込みのみ（node:sqlite / fetch / zlib）。npmパッケージは原則入れない
-- 静的生成: site/build.mjs → site/dist。ビルドはGitHub Actionsで実行、Netlifyへはdist配信のみ
+- 静的生成: site/build.mjs → site/dist。ビルドはNetlify上で実行（netlify.toml のcommandで取得→生成→配信）
+- **デプロイ規律（2026-08-24）**: Netlify無料枠はクレジット制で、デプロイ1回=15クレジット（月3,000）。
+  デプロイは毎朝8:00 JSTのBuild hook 1回に寄せ、手動pushは既定でコミットメッセージに `[skip netlify]` を付ける。
+  即時デプロイは本番不具合の修正時のみ（docs/incident-2026-08-24-netlify-usage.md）
 - データは data/*.db（gitignore）。一次ソースから毎日再取得可能な設計にする
 - コミット作者は hojokin-dev。実名・個人情報を書かない。区切りごとに日本語メッセージで自動コミット
 - **コスト規律**: Maxプラン内で完結させる。分類等にAnthropic APIなど従量課金を使う前に、件数×単価で見積もって承認を得る。
