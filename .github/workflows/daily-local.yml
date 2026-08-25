@@ -33,6 +33,9 @@ jobs:
           node pipeline/fetch_supercals.mjs okinawa $FY
           node pipeline/fetch_supercals.mjs mie $FY
           node pipeline/fetch_akita.mjs $FY
+          # かながわ（DENTYO系）は落札者名が詳細ページにしかなく1件1リクエスト。
+          # 未取得分も毎日少しずつ埋まるよう上限つきで回す（残りは翌日以降に持ち越し）
+          node pipeline/fetch_dentyo.mjs kanagawa $FY --max=1500
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
         run: |
