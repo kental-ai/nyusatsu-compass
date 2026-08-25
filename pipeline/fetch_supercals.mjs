@@ -7,17 +7,38 @@ import { openDb } from './db.mjs';
 import { classify } from './taxonomy.mjs';
 
 // 採用県のインスタンス表（偵察で3手プロトコル実証済みのものだけ追加する）
-// kikan を持つものは富士通の共有ホスト（ep-bis.supercals.jp）に相乗りしており、
-// KikanNO（先頭2桁=JIS都道府県コード）でテナントを指定しないと検索できない。
+// ep-bis共有ホストのテナント表。KikanNO = JIS X 0402の団体コード5桁 + "00"。
+// 値 null = 県本体（機関名は一覧の見出しから取る）。市町村は見出しに団体名が出ないため名前を明示する。
+// 団体名は総務省「都道府県コード及び市区町村コード」（令和6年1月1日更新版・2026-08-25取得）で確認。
+// 対象4県の全市町村コード114件を1件ずつ走査して実在テナントだけを列挙している（推測での追加は禁止）。
+const TOCHIGI_KIKANS = {
+  '0900000': null, '0920100': '宇都宮市', '0920800': '小山市', '0921500': '那須烏山市',
+};
+const ISHIKAWA_KIKANS = {
+  '1700000': null, '1720100': '金沢市', '1720300': '小松市', '1720600': '加賀市', '1720700': '羽咋市',
+  '1721000': '白山市', '1721200': '野々市市', '1736100': '津幡町', '1736500': '内灘町',
+  '1738400': '志賀町', '1746100': '穴水町', '1746300': '能登町',
+};
+const OKINAWA_KIKANS = {
+  '4700000': null,
+};
+const MIE_KIKANS = { // 三重県本体はこのホストに無く、市町のみが相乗りしている
+  '2420400': '松阪市', '2420700': '鈴鹿市', '2420800': '名張市', '2421600': '伊賀市', '2444300': '大台町',
+};
+
+const EPBIS = 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj'; // 富士通ASP共同ホスト（マルチテナント）
+
 export const INSTANCES = {
   chiba: { base: 'https://www.chiba-ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '千葉県' },
   shizuoka: { base: 'https://www.ppi.cals-shiz.jp/ebidPPIPublish/EjPPIj', pref: '静岡県' }, // 2024年度〜・法人番号あり・県+市町村
   miyazaki: { base: 'https://www.e-nyusatsu-joho.pref.miyazaki.lg.jp/ebidPPIPublish/EjPPIj', pref: '宮崎県' }, // 法人番号あり・14機関
   // 2026-08-24 に平日プローブで実証（いずれも法人番号なし・2025年度〜の保持）
   niigata: { base: 'https://www.ep-bis.pref.niigata.jp/ebidPPIPublish/EjPPIj', pref: '新潟県' },
-  tochigi: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '栃木県', kikan: '0900000' },
-  ishikawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '石川県', kikan: '1700000' },
-  okinawa: { base: 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj', pref: '沖縄県', kikan: '4700000' },
+  // 共有ホスト勢は上の kikans（KikanNO → 機関名）でテナントを列挙する
+  tochigi: { base: EPBIS, pref: '栃木県', kikans: TOCHIGI_KIKANS },
+  ishikawa: { base: EPBIS, pref: '石川県', kikans: ISHIKAWA_KIKANS },
+  okinawa: { base: EPBIS, pref: '沖縄県', kikans: OKINAWA_KIKANS },
+  mie: { base: EPBIS, pref: '三重県', kikans: MIE_KIKANS }, // 県本体は非搭載。市町村テナントのみ相乗り
   // 愛媛: 2026-08-23時点で保留。8列型だが一部の行で案件名セルが分割され列がずれる（原因未特定）。
   //       2026-08-24: ヘッダー列数ガードで検証中。 
   ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県', caseNoOrg: true },
@@ -46,18 +67,26 @@ let requestCount = 0;
 function cookieHeader() {
   return Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
 }
-async function req(body = null) {
+async function req(body = null, tries = 3) {
   requestCount++;
-  const res = await fetch(BASE, {
-    method: body ? 'POST' : 'GET',
-    headers: {
-      'User-Agent': 'nyusatsu-compass-bot/1.0 (+https://nyusatsu-compass.com/about/)',
-      ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
-      ...(Object.keys(cookies).length ? { Cookie: cookieHeader() } : {}),
-    },
-    body: body ? new URLSearchParams(body).toString() : undefined,
-    redirect: 'manual',
-  });
+  let res;
+  try {
+    res = await fetch(BASE, {
+      method: body ? 'POST' : 'GET',
+      headers: {
+        'User-Agent': 'nyusatsu-compass-bot/1.0 (+https://nyusatsu-compass.com/about/)',
+        ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+        ...(Object.keys(cookies).length ? { Cookie: cookieHeader() } : {}),
+      },
+      body: body ? new URLSearchParams(body).toString() : undefined,
+      redirect: 'manual',
+    });
+  } catch (e) { // 共有ホストは稀に接続タイムアウトを返す。日次実行を落とさないため数回だけ待って再試行
+    if (tries <= 1) throw e;
+    console.error(`  再試行(残${tries - 1}): ${e.cause?.code || e.message}`);
+    await sleep(5000);
+    return req(body, tries - 1);
+  }
   for (const sc of res.headers.getSetCookie?.() ?? []) {
     const m = sc.match(/^([^=]+)=([^;]+)/);
     if (m) cookies[m[1]] = m[2];
@@ -92,7 +121,7 @@ const FALLBACK = (n) => { // ヘッダー行を出さないインスタンス（
   return { date: 1, name: 2, category: 3, method: 4, winner: 5 + off, amount: 6 + off, n };
 };
 
-function parseList(html) {
+function parseList(html, orgFixed = null) {
   const total = Number((html.match(/条件に合致したものを([\d,]+)件/) || [])[1]?.replaceAll(',', '') ?? -1);
   const over = /700件以内|条件を設定/.test(html) && total < 0;
   const rows = [];
@@ -114,7 +143,7 @@ function parseList(html) {
     if (!winner && !amount) continue; // 入札中止・結果未確定の行
     // 見出しの先頭語が団体名でない（部局名から始まる=単一機関スコープ）なら県名を機関名にする
     const head = currentOrg.split(/\s+/)[0] || '';
-    let org = /(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref;
+    let org = orgFixed || (/(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref);
     let name = (cells[m.name] || '').replace(/※添付有/, '').trim();
     if (INST.caseNoOrg) { // 案件名の先頭の調達案件番号（20桁以上）＝上5桁が団体コード
       const cm = name.match(/^(\d{5})\d{15,}\s*/);
@@ -130,7 +159,7 @@ function parseList(html) {
   return { total, over, rows, skipped };
 }
 
-async function search(nendo, kikan, extra = {}, stpos = 0) {
+async function search(nendo, kikan, orgFixed, extra = {}) {
   const { text } = await req({
     ejParameterID: 'EjPRJ01', ejProcessName: 'findList',
     Nendo: String(nendo), KikanNO: kikan, BukyokuNO: '', ChoutatsuCD: '', KoujiSyubetu: '',
@@ -138,13 +167,13 @@ async function search(nendo, kikan, extra = {}, stpos = 0) {
     ejDisplaySort: '050045', ejMaxDisplayRowCount: '500', getStpos: '0',
     AllhitSize: '', ejShousaiDispFlag: '', chiikisentaku: '', chiiki_dataList: '',
   });
-  return parseList(text);
+  return parseList(text, orgFixed);
 }
 
 let skippedRows = 0;
 
-async function collectKikan(nendo, kikan, range = null) {
-  const first = await search(nendo, kikan, range || {});
+async function collectKikan(nendo, kikan, orgFixed, range = null) {
+  const first = await search(nendo, kikan, orgFixed, range || {});
   skippedRows += first.skipped || 0;
   if (first.over || first.total > 500) {
     // 開札日範囲の二分割（年度: 4/1〜翌3/31）
@@ -155,8 +184,8 @@ async function collectKikan(nendo, kikan, range = null) {
     const mid = new Date((ld.getTime() + hd.getTime()) / 2);
     const midS = mid.toISOString().slice(0, 10).replaceAll('-', '/');
     const midN = new Date(mid.getTime() + 86400000).toISOString().slice(0, 10).replaceAll('-', '/');
-    return [...await collectKikan(nendo, kikan, { from: lo, to: midS }),
-            ...await collectKikan(nendo, kikan, { from: midN, to: hi })];
+    return [...await collectKikan(nendo, kikan, orgFixed, { from: lo, to: midS }),
+            ...await collectKikan(nendo, kikan, orgFixed, { from: midN, to: hi })];
   }
   return first.rows; // total<=500かつ表示上限500なので1回で全行取得できる
 }
@@ -164,7 +193,7 @@ async function collectKikan(nendo, kikan, range = null) {
 // ---- main ----
 const nendo = process.argv[3] || String(new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1);
 // 'all'=全機関横断（KikanNO空。機関名は見出し行から取得）。共有ホスト勢は INSTANCES.kikan が既定値
-const kikansArg = process.argv[4] ?? (INST.kikan ? INST.kikan : 'all');
+const kikansArg = process.argv[4] ?? (INST.kikans ? Object.keys(INST.kikans).join(',') : 'all');
 
 const db = openDb();
 db.exec(`
@@ -188,9 +217,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_local_corp ON local_awards (corporate_no);
 `);
 
-// セッション確立（GET → StartPage）
+// セッション確立（GET → テナントごとに StartPage）
 await req();
-await req({ ejParameterID: 'StartPage', KikanNO: INST.kikan || 'null' });
 
 const kikans = kikansArg === 'all' ? [''] : kikansArg.split(',');
 const now = new Date().toISOString();
@@ -199,7 +227,9 @@ const ins = db.prepare(`INSERT OR IGNORE INTO local_awards
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 let grand = 0;
 for (const k of kikans) {
-  const rows = await collectKikan(nendo, k);
+  await req({ ejParameterID: 'StartPage', KikanNO: k || 'null' }); // テナント切替のたびに張り直す
+  const orgFixed = INST.kikans?.[k] || null;
+  const rows = await collectKikan(nendo, k, orgFixed);
   db.exec('BEGIN');
   let n = 0;
   for (const r of rows) {
@@ -209,7 +239,7 @@ for (const k of kikans) {
   }
   db.exec('COMMIT');
   grand += n;
-  console.log(`KikanNO=${k}: 取得${rows.length}行 → 新規${n}件`);
+  console.log(`KikanNO=${k}${orgFixed ? `(${orgFixed})` : ''}: 取得${rows.length}行 → 新規${n}件`);
 }
 const c = db.prepare(`SELECT COUNT(*) c, COUNT(DISTINCT corporate_no) k FROM local_awards WHERE src = '${slug}'`).get();
 console.log(`合計[${slug}]: 新規${grand}件 / 累計${c.c}件・法人番号ユニーク${c.k} / リクエスト${requestCount}回 / 列ズレ除外${skippedRows}行`);

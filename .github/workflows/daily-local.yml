@@ -26,11 +26,12 @@ jobs:
           node pipeline/fetch_supercals.mjs shizuoka $FY all
           node pipeline/fetch_supercals.mjs miyazaki $FY all
           node pipeline/fetch_supercals.mjs ehime $FY all
-          # 富士通の共有ホスト勢（KikanNOはインスタンス定義の既定値を使う）。平日6:00〜23:00 JSTのみ稼働
+          # 富士通の共有ホスト勢（KikanNOはインスタンス定義の kikans を全テナント巡回）。平日6:00〜23:00 JSTのみ稼働
           node pipeline/fetch_supercals.mjs niigata $FY
           node pipeline/fetch_supercals.mjs tochigi $FY
           node pipeline/fetch_supercals.mjs ishikawa $FY
           node pipeline/fetch_supercals.mjs okinawa $FY
+          node pipeline/fetch_supercals.mjs mie $FY
           node pipeline/fetch_akita.mjs $FY
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
