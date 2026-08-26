@@ -89,6 +89,8 @@ const waDate = (s0) => {
   if (m) return `${(m[1] === '平成' ? 1988 : 2018) + Number(m[2])}-${p2(m[3])}-${p2(m[4])}`;
   return '';
 };
+// 部を持たない団体は発注部局名が「＊」というプレースホルダになる（例「＊ 契約検査課」）
+const cleanDept = (s) => (s || '').replace(/^＊\s*/, '').trim();
 const body0 = (html) => html.slice(html.indexOf('<BODY'));
 const hiddens = (html) => Object.fromEntries(
   [...html.matchAll(/<INPUT type="hidden" name="([^"]+)" value="([^"]*)"/gi)].map((m) => [m[1], m[2]]));
@@ -214,7 +216,7 @@ for (const dan of dantais) {
         if (!d.winner || !/落札/.test(d.result)) { dropped++; continue; }
         const openDate = d.open_date || row.open_date;
         const name = d.name || row.name;
-        n += ins.run(slug, dan.name, d.dept || row.dept, INST.pref, name, openDate,
+        n += ins.run(slug, dan.name, cleanDept(d.dept || row.dept), INST.pref, name, openDate,
           d.category || row.category, d.method || row.method, d.winner, '', d.amount,
           classify(name), Number(nendo), nowIso).changes;
       }
