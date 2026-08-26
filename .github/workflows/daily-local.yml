@@ -36,6 +36,9 @@ jobs:
           # かながわ（DENTYO系）は落札者名が詳細ページにしかなく1件1リクエスト。
           # 未取得分も毎日少しずつ埋まるよう上限つきで回す（残りは翌日以降に持ち越し）
           node pipeline/fetch_dentyo.mjs kanagawa $FY --max=1500
+          # 大分（DENTYO旧型・東芝PPI）も落札者名が詳細ページにしかなく1件1リクエスト。
+          # 当年度の未取得分を毎日少しずつ埋める（団体順に進み、既知行は詳細を取らずに飛ばす）
+          node pipeline/fetch_dentyo_ppi.mjs oita $FY --max=1200
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
         run: |
