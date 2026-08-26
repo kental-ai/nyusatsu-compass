@@ -196,7 +196,8 @@ const now = new Date().toISOString();
 // 実測: どの団体を選んでも同じ件数が返り、一覧の「団体名」列に31団体が混在する。
 // → 団体ごとに回さず1回の検索で県内全団体を取り、発注機関は一覧の団体名列から取る。
 const top = await menuPage();
-if (!top.dantais.length) { console.error('団体一覧を取得できなかった（運用時間外・仕様変更の可能性）'); process.exit(1); }
+// 運用時間外は団体一覧が取れない。日次ワークフローを落とさないよう正常終了する（0件で無害）
+if (!top.dantais.length) { console.log('団体一覧を取得できなかった（運用時間外・仕様変更の可能性）。0件で終了'); process.exit(0); }
 const ANCHOR = top.dantais[0]; // 検索画面に入るための足がかり（結果の範囲には影響しない）
 const YEARS = (pos[1] || NENDO).split(',');
 console.log(`[${slug}] ${YEARS.join('/')}年度 / 業種${GYOSHU.join(',')} / リクエスト上限${MAXREQ} / 団体${top.dantais.length}（横断検索）`);
