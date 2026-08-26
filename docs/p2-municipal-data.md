@@ -282,6 +282,9 @@ SuperCALS とは別系統で、URLパスが `/DENTYO/`、画面IDが `P5515_10`�
 ### 運用
 `.github/workflows/daily-local.yml` に `node pipeline/fetch_dentyo.mjs kanagawa $FY --max=1500` を追加。
 当年度の未取得分（いまは物品の残り約2,800件）も毎日1,500件ずつ自然に埋まる。日次の追加所要は約13分。
+稼働時間の公表は見つからなかった（08-26の夕方は稼働）。**運用時間外に団体一覧が取れなかった場合は
+0件で正常終了する**ようにしてある（exit 1 にすると日次ジョブが途中で落ちてスナップショット出力まで
+到達しないため）。翌朝の日次実行で稼働時間が判明する。
 
 ### マナーとコンプライアンスの確認
 - `ebid-joho.e-kanagawa.lg.jp` と `nyusatsu.e-kanagawa.lg.jp` はいずれも **robots.txt が404**（拒否表明なし）
