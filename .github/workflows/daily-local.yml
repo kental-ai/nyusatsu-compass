@@ -22,23 +22,25 @@ jobs:
           Y=$(TZ=Asia/Tokyo date +%Y)
           M=$(TZ=Asia/Tokyo date +%m)
           FY=$Y; if [ "$M" -lt 04 ]; then FY=$((Y-1)); fi
-          node pipeline/fetch_supercals.mjs chiba $FY all
-          node pipeline/fetch_supercals.mjs shizuoka $FY all
-          node pipeline/fetch_supercals.mjs miyazaki $FY all
-          node pipeline/fetch_supercals.mjs ehime $FY all
+          # 1本のフェッチャが落ちてもスナップショット出力まで到達させる（各フェッチャはDBへ逐次書くので
+          # 途中まで取れた分は残る）。08-26/27は大分ホストへの接続タイムアウトで日次が丸ごと失敗した
+          node pipeline/fetch_supercals.mjs chiba $FY all || echo "::warning::chiba の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs shizuoka $FY all || echo "::warning::shizuoka の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs miyazaki $FY all || echo "::warning::miyazaki の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs ehime $FY all || echo "::warning::ehime の取得に失敗（継続）"
           # 富士通の共有ホスト勢（KikanNOはインスタンス定義の kikans を全テナント巡回）。平日6:00〜23:00 JSTのみ稼働
-          node pipeline/fetch_supercals.mjs niigata $FY
-          node pipeline/fetch_supercals.mjs tochigi $FY
-          node pipeline/fetch_supercals.mjs ishikawa $FY
-          node pipeline/fetch_supercals.mjs okinawa $FY
-          node pipeline/fetch_supercals.mjs mie $FY
-          node pipeline/fetch_akita.mjs $FY
+          node pipeline/fetch_supercals.mjs niigata $FY || echo "::warning::niigata の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs tochigi $FY || echo "::warning::tochigi の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs ishikawa $FY || echo "::warning::ishikawa の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs okinawa $FY || echo "::warning::okinawa の取得に失敗（継続）"
+          node pipeline/fetch_supercals.mjs mie $FY || echo "::warning::mie の取得に失敗（継続）"
+          node pipeline/fetch_akita.mjs $FY || echo "::warning::fetch_akita.mjs の取得に失敗（継続）"
           # かながわ（DENTYO系）は落札者名が詳細ページにしかなく1件1リクエスト。
           # 未取得分も毎日少しずつ埋まるよう上限つきで回す（残りは翌日以降に持ち越し）
-          node pipeline/fetch_dentyo.mjs kanagawa $FY --max=1500
+          node pipeline/fetch_dentyo.mjs kanagawa $FY --max=1500 || echo "::warning::kanagawa の取得に失敗（継続）"
           # 大分（DENTYO旧型・東芝PPI）も落札者名が詳細ページにしかなく1件1リクエスト。
           # 当年度の未取得分を毎日少しずつ埋める（団体順に進み、既知行は詳細を取らずに飛ばす）
-          node pipeline/fetch_dentyo_ppi.mjs oita $FY --max=1200
+          node pipeline/fetch_dentyo_ppi.mjs oita $FY --max=1200 || echo "::warning::oita の取得に失敗（継続）"
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
         run: |
