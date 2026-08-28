@@ -137,6 +137,9 @@ for (const a of AWARDS) {
   (byMinistry.get(a.ministry_code) ?? byMinistry.set(a.ministry_code, []).get(a.ministry_code)).push(a);
 }
 const companyName = new Map(COMPANIES.map((c) => [c.corporate_no, c.name]));
+// 企業ページはMIN_COMPANY_AWARDS未満だと生成されない。リンクは必ずこのヘルパー経由にして404を出さない
+const companyLink = (no, label) => (no && byCompany.has(no) && (byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS)
+  ? `<a href="/company/${no}/">${label}</a>` : label;
 
 // 案件名クラスタ（同一契約の年次繰り返しを検出。企業ページの「契約ヒストリー」と次回予測の基盤）
 const normName = (n) => n.replace(/令和\d+年度?|平成\d+年度?|Ｒ\d+|R\d+|[０-９0-9]+|（[^）]*）|\([^)]*\)|【[^】]*】|[　\s]/g, '');
@@ -359,7 +362,7 @@ ${cta(path)}</div></div>`}
 const awardRows = (list, { company = true, freeRows = Infinity } = {}) => `
 <div class="wrap"><table><tr><th>落札日</th><th>案件名</th><th>機関</th>${company ? '<th>落札者</th>' : ''}<th>落札価格</th></tr>
 ${list.map((a, i) => `<tr><td>${a.award_date}</td><td>${esc(a.name)}</td><td>${esc(MINISTRIES[a.ministry_code] || a.ministry_code)}</td>${
-  company ? `<td>${a.corporate_no ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td>` : ''
+  company ? `<td>${companyLink(a.corporate_no, esc(a.winner_name))}</td>` : ''
 }<td class="num">${i < freeRows ? yen(a.amount) : gM(yen(a.amount))}</td></tr>`).join('\n')}</table></div>`;
 
 const statBoxes = (pairs) => `<div class="stats">${pairs.map(([k, v]) => `<div class="stat"><b>${v}</b>${k}</div>`).join('')}</div>`;
@@ -775,7 +778,7 @@ for (const [corpNo, list] of byCompany) {
     return `<h3>${contractLink(clusterKey(a), esc(a.name))}</h3>
 <p class="meta">${forecast}</p>
 <div class="wrap"><table><tr><th>落札日</th><th>落札者</th><th>落札価格</th></tr>
-${cl.slice(0, 8).map((x, i) => `<tr><td>${x.award_date}</td><td>${x.corporate_no === corpNo ? `<b>${esc(x.winner_name)}</b>` : (x.corporate_no ? `<a href="/company/${x.corporate_no}/">${esc(x.winner_name)}</a>` : esc(x.winner_name))}</td><td class="num">${i === 0 ? yen(x.amount) : gM(yen(x.amount))}</td></tr>`).join('\n')}
+${cl.slice(0, 8).map((x, i) => `<tr><td>${x.award_date}</td><td>${x.corporate_no === corpNo ? `<b>${esc(x.winner_name)}</b>` : companyLink(x.corporate_no, esc(x.winner_name))}</td><td class="num">${i === 0 ? yen(x.amount) : gM(yen(x.amount))}</td></tr>`).join('\n')}
 </table></div>`;
   }).join('\n');
 
@@ -1238,9 +1241,9 @@ ${kunSays(`この週の国の機関の落札は<b>${list.length.toLocaleString()
 ${repl.length ? `<h2>契約リプレイス（業者交代が起きた契約）</h2>
 <p class="meta">前回と落札者が変わった契約。競争が動いた場所であり、次回の狙い目でもあります。</p>
 <div class="wrap"><table><tr><th>案件</th><th>新しい落札者</th><th>今回</th><th>前回の落札者</th><th>前回</th></tr>
-${repl.map(({ a, prev }) => `<tr><td>${esc(a.name)}</td><td><a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a></td><td class="num">${yen(a.amount)}</td><td><a href="/company/${prev.corporate_no}/">${esc(prev.winner_name)}</a></td><td class="num">${yen(prev.amount)}</td></tr>`).join('\n')}</table></div>` : ''}
+${repl.map(({ a, prev }) => `<tr><td>${esc(a.name)}</td><td>${companyLink(a.corporate_no, esc(a.winner_name))}</td><td class="num">${yen(a.amount)}</td><td>${companyLink(prev.corporate_no, esc(prev.winner_name))}</td><td class="num">${yen(prev.amount)}</td></tr>`).join('\n')}</table></div>` : ''}
 ${debut.length ? `<h2>新規参入（この週に初落札）</h2>
-<ul>${debut.map((no) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a></li>`).join('')}</ul>` : ''}
+<ul>${debut.map((no) => `<li>${companyLink(no, esc(companyName.get(no) || no))}</li>`).join('')}</ul>` : ''}
 <h2>分野別の落札件数</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`, 8)}`,
     });
   }
