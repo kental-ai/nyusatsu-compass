@@ -63,8 +63,14 @@ const AWARDS = db.prepare(`
   FROM awards a LEFT JOIN enrich_class c ON a.rowid = c.award_rowid
   ORDER BY a.award_date DESC`).all();
 const COMPANIES = db.prepare(`SELECT corporate_no, name FROM companies`).all();
+// 表示品質: 公式データの社名は全角英数（例: Ｎｏａｈｌｏｇｙ株式会社 / 株式会社ＵＳＥＮ　ＦＩＥＬＤＩＮＧ）が多く読みにくい。
+// NFKCで英数字・記号・スペースを半角へ正規化して表示する（DBのキーや原データは変更しない。カナ・漢字は不変）
+const normDisp = (s) => (s ? String(s).normalize('NFKC').replace(/\s+/g, ' ').trim() : s);
+for (const c of COMPANIES) c.name = normDisp(c.name);
+for (const a of AWARDS) a.winner_name = normDisp(a.winner_name);
 let LOCALS = [];
 try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year FROM local_awards ORDER BY open_date DESC`).all(); } catch {}
+for (const a of LOCALS) a.winner_name = normDisp(a.winner_name);
 const byCorpLocal = new Map();
 for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? byCorpLocal.set(a.corporate_no, []).get(a.corporate_no)).push(a);
 const PREF_SLUGS = {
@@ -137,9 +143,11 @@ for (const a of AWARDS) {
   (byMinistry.get(a.ministry_code) ?? byMinistry.set(a.ministry_code, []).get(a.ministry_code)).push(a);
 }
 const companyName = new Map(COMPANIES.map((c) => [c.corporate_no, c.name]));
-// 企業ページはMIN_COMPANY_AWARDS未満だと生成されない。リンクは必ずこのヘルパー経由にして404を出さない
-const companyLink = (no, label) => (no && byCompany.has(no) && (byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS)
-  ? `<a href="/company/${no}/">${label}</a>` : label;
+// ページが生成されない対象（企業=落札2件未満・機関=50件未満）にはリンクしない。リンクは必ずこのヘルパー経由にして404を出さない
+const companyHref = (no) => (no && byCompany.has(no) && (byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS) ? `/company/${no}/` : null;
+const companyLink = (no, label) => companyHref(no) ? `<a href="${companyHref(no)}">${label}</a>` : label;
+const organHref = (code) => (code && MINISTRIES[code] && (byMinistry.get(code) || []).length >= MIN_PRICE_AWARDS) ? `/organ/${code.toLowerCase()}/` : null;
+const organLink = (code, label) => organHref(code) ? `<a href="${organHref(code)}">${label}</a>` : label;
 
 // 案件名クラスタ（同一契約の年次繰り返しを検出。企業ページの「契約ヒストリー」と次回予測の基盤）
 const normName = (n) => n.replace(/令和\d+年度?|平成\d+年度?|Ｒ\d+|R\d+|[０-９0-9]+|（[^）]*）|\([^)]*\)|【[^】]*】|[　\s]/g, '');
@@ -445,8 +453,9 @@ function groupTable(list, keyFn, labelFn, linkFn = null, limit = 10) {
   const m = new Map();
   for (const a of list) { const k = keyFn(a); if (!k) continue; const o = m.get(k) ?? { n: 0, sum: 0 }; o.n++; o.sum += a.amount || 0; m.set(k, o); }
   const rows = [...m.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, limit);
+  if (!rows.length) return `<p class="meta">分類・集計できる実績がまだありません。</p>`;
   return `<div class="wrap"><table><tr><th></th><th>件数</th><th>合計金額</th></tr>${rows.map(([k, o]) =>
-    `<tr><td>${linkFn ? `<a href="${linkFn(k)}">${esc(labelFn(k))}</a>` : esc(labelFn(k))}</td><td class="num">${o.n.toLocaleString()}</td><td class="num">${yen(o.sum)}</td></tr>`).join('\n')}</table></div>`;
+    `<tr><td>${(() => { const h = linkFn && linkFn(k); return h ? `<a href="${h}">${esc(labelFn(k))}</a>` : esc(labelFn(k)); })()}</td><td class="num">${o.n.toLocaleString()}</td><td class="num">${yen(o.sum)}</td></tr>`).join('\n')}</table></div>`;
 }
 
 // ---------- 生成 ----------
@@ -499,8 +508,8 @@ ${statBoxes([['実績件数', list.length.toLocaleString() + '件'], ['最も多
 ${bandTable(list)}
 ${(() => { const regs = [...localByPrefCat.entries()].filter(([k, v]) => k.endsWith('|' + t.slug) && v.length >= 30).map(([k]) => k.split('|')[0]); return regs.length ? `<h2>地域別の相場</h2><p>${regs.map((pn) => `<a href="/price/${t.slug}/${PREF_SLUGS[pn]}/">${pn}の${t.label}</a>`).join(' ／ ')}</p>` : ''; })()}
 <h2>発注時期のパターン</h2>${monthChart(list, t.label)}
-<h2>発注が多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => `/organ/${k.toLowerCase()}/`)}
-<h2>落札件数の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
+<h2>発注が多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => organHref(k))}
+<h2>落札件数の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => companyHref(k))}
 <h2>入札方式の内訳</h2>${groupTable(list, (a) => a.method_code, (k) => BIDDING_METHODS[k] || k)}
 <h2>直近の落札事例</h2>${awardRows(recent)}`,
   });
@@ -508,6 +517,13 @@ ${(() => { const regs = [...localByPrefCat.entries()].filter(([k, v]) => k.endsW
 
 // 地域×業務の相場ページ（自治体データ。競合ゼロ棚。データ30件以上のみ）
 let regionPriceCount = 0;
+// 地域相場ページの実在集合（'分類slug|県slug'）。リンク側はこの集合でガードして404を防ぐ
+const prefCatPages = new Set();
+for (const [key, rlist] of localByPrefCat) {
+  if (rlist.length < 30) continue;
+  const [pn, cs] = key.split('|');
+  if (PREF_SLUGS[pn] && LABEL[cs]) prefCatPages.add(cs + '|' + PREF_SLUGS[pn]);
+}
 for (const [key, rlist] of localByPrefCat) {
   if (rlist.length < 30) continue;
   const [prefName, cslug] = key.split('|');
@@ -599,7 +615,7 @@ for (const [id, c] of CONTRACTS) {
       { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) },
     ],
     body: `<h1>${esc(name)}の落札結果・落札履歴</h1>
-<p class="meta">発注機関: <a href="/organ/${ministry.toLowerCase()}/">${esc(mname)}</a>${slug && slug !== 'other' ? ` ／ 業務分野: <a href="/price/${slug}/">${LABEL[slug]}</a>` : ''}</p>
+<p class="meta">発注機関: ${organLink(ministry, esc(mname))}${slug && slug !== 'other' ? ` ／ 業務分野: <a href="/price/${slug}/">${LABEL[slug]}</a>` : ''}</p>
 <h2 style="margin-top:1em">値付けの目安（札を入れる前に）</h2>
 ${statBoxes([['前回の落札額', yen(last.amount)], ['この契約の中央値', gM(yen(med))], ['同分野・同規模帯との比較', vsBand === null ? '—' : gM(`${vsBand > 0 ? '+' : ''}${vsBand}%`, '●%')], ['例年の落札月', m ? m + '月頃' : '—'], ['前回の落札者', last.winner_name.length > 14 ? last.winner_name.slice(0, 14) + '…' : last.winner_name]])}
 ${(() => { const r = estimateRange(arr); return `<div class="lockbox"><h3>この契約の「勝てる札」推定レンジ</h3>
@@ -616,7 +632,7 @@ ${arr.map((a, i) => { const prev = arr[i + 1]; const d = prev && prev.amount > 0
 <p class="tbl-note unlock-hide">${arr.length > 1 ? `過去${arr.length - 1}件の落札金額と前回比は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/contract/${id}/`)}` : ''}</p>
 <p class="meta">案件名の年度表記ゆれ（令和◯年度等）を正規化して同一契約として束ねています。別契約が混在する場合は<a href="/policy/">こちら</a>からお知らせください。</p>
 <h2>よくある質問</h2>${faqs.map(([q, a]) => `<h3>Q. ${esc(q)}</h3><p>A. ${esc(a)}</p>`).join('\n')}
-<p>${slug && slug !== 'other' ? `<a href="/price/${slug}/">→ ${LABEL[slug]}の相場・類似案件検索</a> ／ ` : ''}<a href="/organ/${ministry.toLowerCase()}/">→ ${esc(mname)}の入札結果を見る</a></p>`,
+<p>${slug && slug !== 'other' ? `<a href="/price/${slug}/">→ ${LABEL[slug]}の相場・類似案件検索</a> ／ ` : ''}${organHref(ministry) ? `<a href="${organHref(ministry)}">→ ${esc(mname)}の入札結果を見る</a>` : `<a href="/organ/">→ 発注機関別の落札結果を見る</a>`}</p>`,
   });
 }
 // 機関別の契約一覧（ページネーション）+ 全体ハブ
@@ -863,7 +879,7 @@ ${cl.slice(0, 8).map((x, i) => `<tr><td>${x.award_date}</td><td>${x.corporate_no
       .sort((x, y) => y[1] - x[1]).slice(0, 10);
     if (cohort.length) {
       cohortHtml = `<h2>同じ土俵の企業（${MINISTRIES[minTop[0]] || ''}×${LABEL[catTop[0]]}）</h2>
-<ul>${cohort.map(([no, n]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（${n.toLocaleString()}件）</li>`).join('')}</ul>`;
+<ul>${cohort.map(([no, n]) => `<li>${companyLink(no, esc(companyName.get(no) || no))}（${n.toLocaleString()}件）</li>`).join('')}</ul>`;
     }
   }
 
@@ -880,7 +896,7 @@ ${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総
 ${analysisHtml}
 ${histHtml ? `<h2>継続契約の落札履歴と次回予測</h2>
 <p class="meta">この会社が関わる案件のうち、複数年繰り返し発注されているもの。過去に誰がいくらで落札してきたかの履歴です。</p>${histHtml}` : ''}
-<h2>取引の多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => `/organ/${k.toLowerCase()}/`)}
+<h2>取引の多い機関</h2>${groupTable(list, (a) => a.ministry_code, (k) => MINISTRIES[k] || k, (k) => organHref(k))}
 <h2>業務分野</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
 ${cohortHtml}
 ${(() => { const loc = byCorpLocal.get(corpNo); if (!loc?.length) return ''; const lt = loc.reduce((s, a) => s + (a.amount || 0), 0); return `<h2>自治体の落札実績（${loc[0].pref}域）</h2>
@@ -921,7 +937,7 @@ let catIndexHtml = '';
         desc: `官公庁入札で「${LABEL[slug]}」分野の落札が最も多い企業${list.length.toLocaleString()}社を落札件数順に掲載。各社の落札実績・取引機関・継続契約の履歴へ。`,
         crumb: pg === 0 ? [['落札企業', '/company/'], [LABEL[slug], '']] : [['落札企業', '/company/'], [LABEL[slug], `/company/cat/${slug}/`], [`${pg + 1}ページ目`, '']],
         body: `<h1>${LABEL[slug]}を主力とする落札企業</h1>
-<p>官公庁入札の落札実績のうち「${LABEL[slug]}」分野が最も多い企業です。相場は<a href="/price/${slug}/">${LABEL[slug]}の落札相場</a>、次回公告の目安は<a href="/radar/${slug}/">満了レーダー</a>へ。</p>${nav}
+<p>官公庁入札の落札実績のうち「${LABEL[slug]}」分野が最も多い企業です。相場は<a href="/price/${slug}/">${LABEL[slug]}の落札相場</a>${radarSlugs.includes(slug) ? `、次回公告の目安は<a href="/radar/${slug}/">満了レーダー</a>` : ''}へ。</p>${nav}
 <ol start="${pg * CPER + 1}">${slice.map(([no, n, c]) => `<li><a href="/company/${no}/">${esc(companyName.get(no) || no)}</a>（全${n.toLocaleString()}件・うち${LABEL[slug]}${c.toLocaleString()}件）</li>`).join('')}</ol>${nav}`,
       });
     }
@@ -966,7 +982,7 @@ ${statBoxes([['実績件数', list.length.toLocaleString() + '件'], ['落札総
 ${kunSays(insights(list, name))}
 <h2>発注時期のパターン</h2>${monthChart(list, name)}
 <h2>発注の多い業務</h2>${groupTable(list.filter((a) => a.slug && a.slug !== 'other'), (a) => a.slug, (k) => LABEL[k] || k, (k) => `/price/${k}/`)}
-<h2>落札の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => `/company/${k}/`)}
+<h2>落札の多い企業</h2>${groupTable(list.filter((a) => a.corporate_no), (a) => a.corporate_no, (k) => companyName.get(k) || k, (k) => companyHref(k))}
 <h2>直近の落札事例</h2>${awardRows(list.slice(0, RECENT_LIMIT))}`,
   });
 }
@@ -1015,7 +1031,7 @@ ${PREFS.map((p) => `<option>${p}</option>`).join('')}</select></label></p>
 });
 page('/alert/welcome/', {
   title: `会員を有効にしました | ${SITE}`,
-  desc: '無料会員が有効になりました。',
+  desc: '入札コンパスの無料会員が有効になりました。歴代の落札金額・前回比・契約ごとの中央値・類似案件検索の全期間をご利用いただけます。',
   noindex: true,
   body: `<div style="text-align:center;margin:24px 0">${kun(90, 'salute')}</div><h1 style="text-align:center">会員を有効にしました!</h1>
 <p style="text-align:center"><b>この端末で1年間、歴代の落札金額・前回比・契約の中央値・類似案件検索の全期間が表示されます。</b></p>
@@ -1089,6 +1105,21 @@ ${[...orgAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 45).map(([o, v]
 ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>`;
   }
 
+  // 市区町村ページの生成条件（落札30件以上 or 自治体自身の公告が直近3件/履歴3件以上）を満たす市だけを対象にする。
+  // 県ページのリンク一覧とページ生成が同じ判定を使うことで、リンク切れを構造的に防ぐ
+  const cityEligible = new Map(); // city → 件数（表示用）
+  {
+    const cand = new Set();
+    for (const a of plist) if (a.org && a.org !== prefName) cand.add(a.org);
+    for (const [k] of noticeByCity) if (k.startsWith(prefName + '|')) cand.add(k.split('|')[1]);
+    for (const [k] of histByCity) if (k.startsWith(prefName + '|')) cand.add(k.split('|')[1]);
+    for (const city of cand) {
+      const nA = plist.filter((a) => a.org === city).length;
+      const nOwn = (noticeByCity.get(prefName + '|' + city) || []).filter((n) => isOwnOrg(n, city)).length;
+      const nHist = (histByCity.get(prefName + '|' + city) || []).filter((n) => isOwnOrg(n, city)).length;
+      if (nA >= 30 || nOwn >= 3 || nHist >= 3) cityEligible.set(city, nA + nOwn + nHist);
+    }
+  }
   const title = hasAwards
     ? `${prefName}の入札結果・入札情報【${ymLabel(plist[0]?.open_date)}更新・県と市町村の落札${plist.length.toLocaleString()}件】｜${SITE}`
     : `${prefName}の入札情報・公告一覧【公告中${nlist.length.toLocaleString()}件】｜${SITE}`;
@@ -1106,21 +1137,14 @@ ${kunSays(hasAwards
     : `${prefName}で直近に公告された入札案件は<b>${nlist.length.toLocaleString()}件</b>だよ。毎日更新しているよ!`)}
 ${statBoxes([...(hasAwards ? [['落札実績', plist.length.toLocaleString() + '件']] : []), ['直近の公告', nlist.length.toLocaleString() + '件'], ...((histByPref.get(prefName) || []).length ? [['公告の履歴', (histByPref.get(prefName) || []).length.toLocaleString() + '件']] : []), ['更新', '毎日']])}
 ${nlist.length ? `<h2>直近の入札公告</h2>${noticeTable(nlist, { withCity: true })}` : ''}
-${(() => { const cnt = new Map();
-  for (const [k, v] of noticeByCity) if (k.startsWith(prefName + '|')) cnt.set(k, (cnt.get(k) || 0) + v.length);
-  for (const [k, v] of histByCity) if (k.startsWith(prefName + '|')) cnt.set(k, (cnt.get(k) || 0) + v.length);
-  const cities = [...cnt.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 80);
-  return cities.length ? `<h2>市区町村別の入札情報</h2><p>${cities.map(([k, n]) => `<a href="/local/${pslug}/${encodeURIComponent(k.split('|')[1])}/">${esc(k.split('|')[1])}</a>（${n}）`).join(' ／ ')}</p>` : ''; })()}
+${(() => { const cities = [...cityEligible.entries()].sort((a, b) => b[1] - a[1]).slice(0, 80);
+  return cities.length ? `<h2>市区町村別の入札情報</h2><p>${cities.map(([city, n]) => `<a href="/local/${pslug}/${encodeURIComponent(city)}/">${esc(city)}</a>（${n}）`).join(' ／ ')}</p>` : ''; })()}
 ${awardHtml}
 ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収録予定です。国の機関の落札実績は<a href="/price/">業務別の落札相場</a>から確認できます。</p>` : ''}`,
   });
 
   // 市区町村ページ: 落札30件以上 ∪ 公告5件以上
-  const cityNames = new Set();
-  for (const a of plist) if (a.org && a.org !== prefName) cityNames.add(a.org);
-  for (const [k, v] of noticeByCity) if (k.startsWith(prefName + '|') && v.length >= 3) cityNames.add(k.split('|')[1]);
-  for (const [k, v] of histByCity) if (k.startsWith(prefName + '|') && v.length >= 3) cityNames.add(k.split('|')[1]);
-  for (const city of cityNames) {
+  for (const city of cityEligible.keys()) {
     const olist = plist.filter((a) => a.org === city);
     const cnotices = noticeByCity.get(prefName + '|' + city) || [];
     const ownNotices = cnotices.filter((n) => isOwnOrg(n, city));   // その自治体自身の発注
@@ -1140,7 +1164,7 @@ ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収�
       const catAgg = new Map();
       for (const a of olist) { if (a.slug && a.slug !== 'other') { const o = catAgg.get(a.slug) ?? { n: 0, sum: 0 }; o.n++; o.sum += a.amount || 0; catAgg.set(a.slug, o); } }
       cityAward = `<h2>発注の多い業務</h2><div class="wrap"><table><tr><th>業務</th><th>件数</th><th>合計金額</th></tr>
-${[...catAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 12).map(([s, v]) => `<tr><td><a href="/price/${s}/${pslug}/">${LABEL[s] || s}</a></td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
+${[...catAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 12).map(([s, v]) => `<tr><td>${prefCatPages.has(s + '|' + pslug) ? `<a href="/price/${s}/${pslug}/">${LABEL[s] || s}</a>` : (LABEL[s] || s)}</td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
 <h2>落札の多い企業</h2><ul>${[...cityCorp.values()].sort((x, y) => y.n - x.n).slice(0, 15).map((v) => `<li>${v.corp && byCompany.has(v.corp) && (byCompany.get(v.corp) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${v.corp}/">${esc(companyName.get(v.corp) || v.name)}</a>` : esc(v.name)}（${v.n}件）</li>`).join('')}</ul>
 <h2>発注時期のパターン</h2>${monthChart(olist.map((a) => ({ award_date: a.open_date })), city)}
 <h2>直近の落札案件</h2><div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>落札者</th><th>金額</th></tr>
@@ -1308,7 +1332,7 @@ page('/shindan/', {
 // about / policy
 page('/about/', {
   title: `運営者情報・データについて | ${SITE}`,
-  desc: '入札コンパスのデータソースと運営方針。',
+  desc: '入札コンパスの運営者情報。調達ポータルの落札実績オープンデータと官公需情報ポータルを毎日取得し、契約・企業・機関・地域の切り口で構造化して公開しています。',
   body: `<h1>運営者情報・データについて</h1>
 <p>${SITE}は、官公庁入札の落札相場・落札実績を公開データから構造化して提供するサービスです。
 「この案件はいくらで落ちるのか」「どの機関がいつ発注するのか」という入札実務の判断を、
