@@ -96,10 +96,34 @@ const noticeByPref = new Map();
 const noticeByCity = new Map(); // '県|市区町村' → notices[]
 // ページの存在が日々ぶれないよう、判定は35日窓の全公告で行う（表示は新しい順）
 for (const n of [...NOTICES].sort((a, b) => (a.issue_date < b.issue_date ? 1 : -1))) {
+  if ((n.issue_date || '') < new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10)) continue; // 35日より古い分は「履歴」側で扱う
   if (n.pref) (noticeByPref.get(n.pref) ?? noticeByPref.set(n.pref, []).get(n.pref)).push(n);
   if (n.pref && n.city) {
     const k = n.pref + '|' + n.city;
     (noticeByCity.get(k) ?? noticeByCity.set(k, []).get(k)).push(n);
+  }
+}
+// 公告アーカイブ（notices_archive: 35日窓で消える公告を蓄積したもの）を市区町村別に索引。
+// 現在窓(NOTICES)とkeyで統合し、「履歴」= 現在窓に無い過去分とする。
+let NARCH = [];
+try {
+  NARCH = db.prepare(`SELECT key, name, org, pref, city, issue_date, category, slug FROM notices_archive`).all();
+} catch { /* アーカイブ未整備でもビルド可能 */ }
+// 「直近」= 公告日が35日以内（noticesテーブルの窓幅に依らず日付で判定し、ローカルと本番で描画を揃える）。
+// 「履歴」= それより古いもの（noticesの残りと、noticesに無いアーカイブ分をkeyで統合）。
+const CUR_CUTOFF = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
+const allNoticeKeys = new Set(NOTICES.map((n) => n.key));
+const histRows = [
+  ...NOTICES.filter((n) => (n.issue_date || '') < CUR_CUTOFF),
+  ...NARCH.filter((n) => !allNoticeKeys.has(n.key) && (n.issue_date || '') < CUR_CUTOFF),
+].sort((a, b) => (a.issue_date < b.issue_date ? 1 : -1));
+const histByCity = new Map(); // '県|市区町村' → 過去公告[]（新しい順）
+const histByPref = new Map();
+for (const n of histRows) {
+  if (n.pref) (histByPref.get(n.pref) ?? histByPref.set(n.pref, []).get(n.pref)).push(n);
+  if (n.pref && n.city) {
+    const k = n.pref + '|' + n.city;
+    (histByCity.get(k) ?? histByCity.set(k, []).get(k)).push(n);
   }
 }
 const BUILT_AT = new Date().toISOString().slice(0, 10);
@@ -1020,6 +1044,23 @@ ${list.slice(0, 40).map((n) => `<tr><td>${n.issue_date || '—'}</td><td>${n.url
 <p class="meta">出典: 官公需情報ポータルサイト（中小企業庁）。直近35日間に公告された案件を新しい順に掲載しています（毎日更新）。応募可否・締切は必ず公告原文でご確認ください。</p>`;
 // 自治体自身の発注か（機関名に市区町村名を含む）を判定。国の出先機関の所在地混入を避けるため。
 const isOwnOrg = (n, city) => (n.org || '').includes(city);
+const histTable = (list, max = 60) => `<div class="wrap"><table><tr><th>公告日</th><th>案件名</th><th>発注機関</th><th>区分</th></tr>
+${list.slice(0, max).map((n) => `<tr><td>${n.issue_date || ''}</td><td>${esc(n.name)}</td><td>${esc(n.org || '')}</td><td>${esc(n.category || '')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
+${list.length > max ? `<p class="meta">ほか${(list.length - max).toLocaleString()}件を収録。</p>` : ''}`;
+const histStats = (list, name) => {
+  if (!list.length) return '';
+  const ym = new Map(), cat = new Map();
+  for (const n of list) {
+    const m = (n.issue_date || '').slice(0, 7);
+    if (m) ym.set(m, (ym.get(m) || 0) + 1);
+    if (n.slug && n.slug !== 'other') cat.set(n.slug, (cat.get(n.slug) || 0) + 1);
+  }
+  const cats = [...cat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([s, c]) => `${LABEL[s] || s}（${c}件）`).join('、');
+  const months = [...ym.entries()].sort().slice(-6).map(([m, c]) => `${Number(m.slice(5))}月 ${c}件`).join(' / ');
+  return `<p>${esc(name)}の公告履歴 ${list.length.toLocaleString()}件の内訳: ${cats || '分類集計中'}。月別の公告数は ${months}。
+官公需情報ポータル等では公告は掲載期間終了後に閲覧できなくなりますが、当サイトは取得済みの公告を履歴として保持しています。</p>`;
+};
 
 const allPrefs = new Set([...localByPref.keys(), ...noticeByPref.keys()]);
 for (const prefName of allPrefs) {
@@ -1060,11 +1101,13 @@ ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
 ${kunSays(hasAwards
     ? `${prefName}域の入札結果を<b>${plist.length.toLocaleString()}件</b>収録（県+市町村を横断）。直近の公告は<b>${nlist.length.toLocaleString()}件</b>あるよ!`
     : `${prefName}で直近に公告された入札案件は<b>${nlist.length.toLocaleString()}件</b>だよ。毎日更新しているよ!`)}
-${statBoxes([...(hasAwards ? [['落札実績', plist.length.toLocaleString() + '件']] : []), ['直近の公告', nlist.length.toLocaleString() + '件'], ['更新', '毎日']])}
+${statBoxes([...(hasAwards ? [['落札実績', plist.length.toLocaleString() + '件']] : []), ['直近の公告', nlist.length.toLocaleString() + '件'], ...((histByPref.get(prefName) || []).length ? [['公告の履歴', (histByPref.get(prefName) || []).length.toLocaleString() + '件']] : []), ['更新', '毎日']])}
 ${nlist.length ? `<h2>直近の入札公告</h2>${noticeTable(nlist, { withCity: true })}` : ''}
-${(() => { const cities = [...noticeByCity.entries()].filter(([k, v]) => k.startsWith(prefName + '|') && v.length >= 5)
-    .sort((a, b) => b[1].length - a[1].length).slice(0, 40);
-  return cities.length ? `<h2>市区町村別の入札情報</h2><p>${cities.map(([k, v]) => `<a href="/local/${pslug}/${encodeURIComponent(k.split('|')[1])}/">${esc(k.split('|')[1])}</a>（${v.length}）`).join(' ／ ')}</p>` : ''; })()}
+${(() => { const cnt = new Map();
+  for (const [k, v] of noticeByCity) if (k.startsWith(prefName + '|')) cnt.set(k, (cnt.get(k) || 0) + v.length);
+  for (const [k, v] of histByCity) if (k.startsWith(prefName + '|')) cnt.set(k, (cnt.get(k) || 0) + v.length);
+  const cities = [...cnt.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 80);
+  return cities.length ? `<h2>市区町村別の入札情報</h2><p>${cities.map(([k, n]) => `<a href="/local/${pslug}/${encodeURIComponent(k.split('|')[1])}/">${esc(k.split('|')[1])}</a>（${n}）`).join(' ／ ')}</p>` : ''; })()}
 ${awardHtml}
 ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収録予定です。国の機関の落札実績は<a href="/price/">業務別の落札相場</a>から確認できます。</p>` : ''}`,
   });
@@ -1072,14 +1115,17 @@ ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収�
   // 市区町村ページ: 落札30件以上 ∪ 公告5件以上
   const cityNames = new Set();
   for (const a of plist) if (a.org && a.org !== prefName) cityNames.add(a.org);
-  for (const [k, v] of noticeByCity) if (k.startsWith(prefName + '|') && v.length >= 5) cityNames.add(k.split('|')[1]);
+  for (const [k, v] of noticeByCity) if (k.startsWith(prefName + '|') && v.length >= 3) cityNames.add(k.split('|')[1]);
+  for (const [k, v] of histByCity) if (k.startsWith(prefName + '|') && v.length >= 3) cityNames.add(k.split('|')[1]);
   for (const city of cityNames) {
     const olist = plist.filter((a) => a.org === city);
     const cnotices = noticeByCity.get(prefName + '|' + city) || [];
     const ownNotices = cnotices.filter((n) => isOwnOrg(n, city));   // その自治体自身の発注
     const natNotices = cnotices.filter((n) => !isOwnOrg(n, city));  // 市内に所在する国の機関等
+    const chist = histByCity.get(prefName + '|' + city) || [];      // 公告アーカイブ（現在窓と重複しない過去分）
+    const histOwn = chist.filter((n) => isOwnOrg(n, city));
     // 自治体自身の情報が薄いページは作らない（所在地混入だけのページを防ぐ）
-    if (olist.length < 30 && ownNotices.length < 3) continue;
+    if (olist.length < 30 && ownNotices.length < 3 && histOwn.length < 3) continue;
     localCityCount++;
     const amounts = olist.map((a) => a.amount).filter((n) => n > 0);
     const hasA = olist.length >= 30;
@@ -1101,22 +1147,26 @@ ${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
     page(`/local/${pslug}/${city}/`, {
       title: hasA
         ? `${city}の入札結果【${ymLabel(olist[0]?.open_date)}更新・${olist.length.toLocaleString()}件】落札者と落札金額の一覧｜${SITE}`
-        : `${city}の入札情報・入札公告【直近${ownNotices.length}件】｜${SITE}`,
+        : `${city}の入札情報【直近の公告${ownNotices.length}件・履歴${(ownNotices.length + histOwn.length).toLocaleString()}件】｜${SITE}`,
       desc: hasA
         ? `${city}の入札結果（落札者・落札金額）を${ymLabel(olist[0]?.open_date)}分まで${olist.length.toLocaleString()}件収録、毎日更新。落札価格の中央値${yen(median(amounts))}、発注の多い業務、落札の多い企業、直近の入札公告を公開。`
-        : `${city}が発注した直近の入札公告${ownNotices.length}件を毎日更新で掲載。案件名・区分・公告原文へのリンクに加え、市内の国の機関等の案件${natNotices.length}件もまとめています。`,
+        : `${city}が発注した入札情報を毎日更新で収録（直近の公告${ownNotices.length}件・公告の履歴${(ownNotices.length + histOwn.length).toLocaleString()}件）。掲載期間が終わって公式サイトで見られなくなった公告も履歴として保持しています。`,
       crumb: [['自治体の入札結果', '/local/'], [prefName, `/local/${pslug}/`], [city, '']],
-      lastmod: hasA ? olist[0]?.open_date : (cnotices[0]?.issue_date || BUILT_AT),
+      lastmod: hasA ? olist[0]?.open_date : (cnotices[0]?.issue_date || chist[0]?.issue_date || BUILT_AT),
       jsonld: hasA ? { '@context': 'https://schema.org', '@type': 'Dataset', name: `${city}の落札実績データ`, description: `${city}の入札結果${olist.length}件`, creator: { '@type': 'Organization', name: SITE } } : null,
       body: `<h1>${hasA ? `${city}の入札結果・入札情報` : `${city}の入札情報`}</h1>
 ${kunSays(hasA
     ? `${city}の入札結果を<b>${olist.length.toLocaleString()}件</b>収録。落札価格の中央値は<b>${yen(median(amounts))}</b>だよ${ownNotices.length ? `。直近の公告は<b>${ownNotices.length}件</b>あるよ!` : ''}`
-    : `${city}が発注した直近の入札公告は<b>${ownNotices.length}件</b>だよ。毎日更新しているよ!`)}
-${statBoxes([...(hasA ? [['落札実績', olist.length.toLocaleString() + '件'], ['落札価格の中央値', yen(median(amounts))]] : []), ['直近の公告', ownNotices.length + '件']])}
+    : `${city}が発注した直近の公告は<b>${ownNotices.length}件</b>、過去の公告履歴は<b>${histOwn.length.toLocaleString()}件</b>あるよ。毎日更新しているよ!`)}
+${statBoxes([...(hasA ? [['落札実績', olist.length.toLocaleString() + '件'], ['落札価格の中央値', yen(median(amounts))]] : []), ['直近の公告', ownNotices.length + '件'], ...(chist.length ? [['公告の履歴', chist.length.toLocaleString() + '件']] : [])])}
 ${ownNotices.length ? `<h2>${city}が発注した直近の入札公告</h2>${noticeTable(ownNotices)}` : ''}
 ${natNotices.length ? `<h2>${city}に所在する国の機関等の入札公告</h2>
 <p class="meta">発注機関の所在地が${city}の案件です（履行場所は他地域の場合があります）。</p>${noticeTable(natNotices)}` : ''}
 ${cityAward}
+${chist.length >= 3 ? `<h2>${city}の公告の履歴</h2>
+${histStats(chist, city)}
+${histTable(chist)}
+<p class="meta">履歴は当サイトが官公需情報ポータル等から取得し保存したものです。掲載期間終了後の原文は各発注機関にお問い合わせください。</p>` : ''}
 <p><a href="/local/${pslug}/">→ ${prefName}全体の入札情報を見る</a></p>`,
     });
   }
