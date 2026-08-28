@@ -3,7 +3,7 @@
 [build]
   # 取得 → スナップショット取込 → 分類（awards/local_awards両方）→ 生成 → IndexNow通知。
   # IndexNowの失敗はデプロイを止めない（|| true）。
-  command = "node pipeline/fetch_geps.mjs all && node pipeline/fetch_kkj.mjs 35 && node pipeline/snapshot_local.mjs import && node pipeline/archive_notices.mjs import && node pipeline/classify_rules.mjs && node site/build.mjs && (node pipeline/indexnow.mjs || true)"
+  command = "node pipeline/fetch_geps.mjs all && node pipeline/fetch_kkj.mjs 35 && node pipeline/snapshot_local.mjs import && node pipeline/archive_notices.mjs import && node pipeline/classify_rules.mjs && node site/build.mjs && node tools/qa_dist.mjs --fail && (node pipeline/indexnow.mjs || true)"
   publish = "site/dist"
 
 [build.environment]
