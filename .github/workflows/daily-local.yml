@@ -41,6 +41,9 @@ jobs:
           # 大分（DENTYO旧型・東芝PPI）も落札者名が詳細ページにしかなく1件1リクエスト。
           # 当年度の未取得分を毎日少しずつ埋める（団体順に進み、既知行は詳細を取らずに飛ばす）
           node pipeline/fetch_dentyo_ppi.mjs oita $FY --max=1200 || echo "::warning::oita の取得に失敗（継続）"
+          # 福岡（東芝PPIのP1020画面系）。年度全体だと一覧のページ送りだけで700リクエスト級になるので
+          # 日次は入札日の直近30日だけを見る（既知行は詳細を取らずに飛ばす）
+          node pipeline/fetch_dentyo_p1020.mjs fukuoka --days=30 --max=600 || echo "::warning::fukuoka の取得に失敗（継続）"
           node pipeline/snapshot_local.mjs export
       - name: スナップショットをコミット
         run: |
