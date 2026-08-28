@@ -45,6 +45,11 @@ jobs:
           # 日次は入札日の直近30日だけを見る（既知行は詳細を取らずに飛ばす）
           node pipeline/fetch_dentyo_p1020.mjs fukuoka --days=30 --max=600 || echo "::warning::fukuoka の取得に失敗（継続）"
           node pipeline/snapshot_local.mjs export
+          # KKJ公告のアーカイブ蓄積（直近7日の新着を取り込み、掲載期間が終わって消える前に保存する）
+          node pipeline/archive_notices.mjs import
+          node pipeline/fetch_kkj.mjs 7 || echo "::warning::fetch_kkj(7日窓)の取得に失敗（継続）"
+          node pipeline/archive_notices.mjs absorb
+          node pipeline/archive_notices.mjs export
       - name: スナップショットをコミット
         run: |
           git config user.name "hojokin-dev"

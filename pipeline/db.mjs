@@ -64,6 +64,26 @@ export function openDb() {
     CREATE INDEX IF NOT EXISTS idx_notices_issue ON notices (issue_date);
     CREATE INDEX IF NOT EXISTS idx_notices_slug ON notices (slug);
 
+    CREATE TABLE IF NOT EXISTS notices_archive (   -- 公告の永続アーカイブ（KKJは35日窓で消えるため蓄積する。descriptionは持たない）
+      key           TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      org           TEXT,
+      pref          TEXT,
+      lg_code       TEXT,
+      city          TEXT,
+      issue_date    TEXT,
+      deadline      TEXT,
+      opening       TEXT,
+      category      TEXT,
+      procedure     TEXT,
+      cert          TEXT,
+      url           TEXT,
+      slug          TEXT,
+      first_seen    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_narch_city ON notices_archive (pref, city);
+    CREATE INDEX IF NOT EXISTS idx_narch_issue ON notices_archive (issue_date);
+
     CREATE TABLE IF NOT EXISTS local_awards (       -- 自治体の入札結果（P2。スナップショット供給）
       src         TEXT NOT NULL,
       org         TEXT NOT NULL,
