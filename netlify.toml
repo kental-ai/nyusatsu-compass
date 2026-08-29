@@ -8,6 +8,8 @@
 
 [build.environment]
   NODE_VERSION = "24"
+  # build.mjsは全落札44万件+公告アーカイブをメモリに載せるため、V8既定ヒープでは不足する可能性がある
+  NODE_OPTIONS = "--max-old-space-size=6144"
 
 [functions]
   directory = "netlify/functions"
