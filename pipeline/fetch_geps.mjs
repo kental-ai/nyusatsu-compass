@@ -75,9 +75,11 @@ const db = openDb();
 mkdirSync(RAW_DIR, { recursive: true });
 const mode = process.argv[2] || 'all';
 
-if (mode === 'all') {
+if (mode === 'all' || mode === 'recent') {
+  // recent: 直近2年分のみ（過去年度は snapshot_geps.mjs import で供給。Netlifyのビルド時間上限対策）
   const thisYear = new Date().getFullYear();
-  for (let y = FIRST_YEAR; y <= thisYear; y++) {
+  const startYear = mode === 'recent' ? thisYear - 1 : FIRST_YEAR;
+  for (let y = startYear; y <= thisYear; y++) {
     const filename = `successful_bid_record_info_all_${y}.zip`;
     const cache = join(RAW_DIR, filename);
     let buf;
@@ -106,7 +108,7 @@ if (mode === 'all') {
     .run('geps_diff', d, new Date().toISOString(), rows.length);
   console.log(`差分 ${d}: ${rows.length}行 → 新規${added}件`);
 } else {
-  console.error('usage: node pipeline/fetch_geps.mjs [all|diff [YYYY-MM-DD]]');
+  console.error('usage: node pipeline/fetch_geps.mjs [all|recent|diff [YYYY-MM-DD]]');
   process.exit(1);
 }
 
