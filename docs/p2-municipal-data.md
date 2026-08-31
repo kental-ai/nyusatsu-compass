@@ -420,3 +420,92 @@ GSC第3回レビューの結論「◯◯市 入札の棚は全国にあり、公
   （リンクなし・統計プローズつき）。市区町村ページの作成条件を「履歴3件以上」まで緩和
 - 結果: **市区町村ページ 315 → 618（+303。岐阜・長崎・青森・山形など落札データ未収録県に初展開）**。
   アーカイブが太るほどページ数と各ページの文字数が自然に増える構造
+
+## 第7次: PPI_P系（NEC）を新設し広島市を本番投入（2026-08-31 深夜〜09-01 未明）
+
+### 投入した内容（新規 5,381件・累計 144,386件／収録14src・13県＋広島県）
+| 団体 | src | 件数 | 収録範囲 | 区分 | 法人番号 |
+|------|-----|------|---------|------|---------|
+| 広島市 | hiroshima（新設） | 5,381 | 2017年度〜2026年度 | 工事895 / 物品2,113 / 委託1,609 / コンサル438 / 施設220 / リース106 | なし |
+
+年度別: 2025年度3,902・2026年度1,098・2024年度124・2023年度149・2022年度67・2021年度26・2020年度以前15。
+品質: 開札日・案件名・落札者名・落札金額・契約担当課の欠損ゼロ、金額0の行ゼロ。
+6区分から36行を目視し、案件名の地名と発注部局が整合することを確認
+（佐伯３区127号線＝佐伯区役所区政調整課、江波水資源再生センター＝下水道局、
+安佐南工場の脱酸素剤＝環境局安佐南工場 ほか）。
+
+### 新ファミリ: pipeline/fetch_ppi_p.mjs（PPI_P系＝NEC製 e-GOV PPI）
+広島市 調達情報公開システム `https://ppi.keiyaku.city.hiroshima.lg.jp/PPI_P/`。
+サーブレットのパッケージ名が `jp.co.nec.ome.egov.ppi.*` で、SuperCALS（富士通）・DENTYO（東芝）とは別系統。
+
+**この系統は圧倒的に安い: 一覧に落札業者名と落札金額が載り、しかも表示上限が無い。**
+1検索＝1リクエストで全件が1ページに返る（1,765件でも1ページ）。DENTYO系の「詳細1件＝1リクエスト」も
+SuperCALSの「700件制限を二分割で回避」も要らない。広島市の全量5,708行がわずか468リクエスト。
+
+到達手順:
+1. `GET /PPI_P/pages/PPI_P/PiCtBrFi02/PiCtBrFi02start.vm`（ダイレクト検索・結果情報の入口）
+2. `POST /PPI_P/PiCtBrFi02Start.do` {omeProcessName:start, omeParameterGroupID:…PiCtBrFi02E01.Start}
+   → 検索条件画面。**jsessionid はURLパスに埋まる**（`…GetList.do;jsessionid=…`）ので以降引き回す
+3. `POST /PPI_P/<画面>;jsessionid=…` {omeProcessName:findList, omeParameterGroupID:…FindList,
+   pPI_ORGNAME, pPI_SPLYNM, pPI_BIDDATE_S/E（YYYY/MM/DD）, rowCount, ppi_backflag:direct, ome*Position}
+
+**調達区分（pPI_SPLYNM）の値の先頭1桁が遷移先画面を表す**のが要点:
+`0`=工事系 PiCtBrFi02GetList.do / `1`=物品系 PiAtBrFi01GetList.do / `2`=その他 PiOtBrFi01GetList.do。
+どの画面も一覧の列構成は同じ9列（No./契約担当課/開札日/案件名/場所/落札業者名/落札金額/添付/詳細）で、
+案件名と場所の見出し語だけが違う（工事名・件名・業務名／工事場所・納入場所・履行場所）。
+ヘッダ行の見出しから列位置を引くようにしてあるので画面を増やしても壊れない。
+
+その他の実測:
+- 落札業者名が空で金額欄が「不調」の行がある（＝不落・不調）。今回5,708行中326行（5.7%）。除外している
+- 開札日は `R8.08.25` 形式（元号1文字＋年.月.日）。既存の和暦パーサとは別形式なのでこのファイルで持つ
+- 発注機関プルダウンは 広島市／水道局／病院事業局 の3つだが、**2005〜2026年度の全期間で
+  水道局・病院事業局は結果情報0件**（走査済み・再走査不要）。結果を出しているのは広島市本体のみ
+- 保持期間は事実上2021年度〜（それ以前は年数件）。物品・コンサルは2024年度以前がほぼ空
+
+### 香川（PPI_P・GSCで優先度を上げていた県）は運用時間外で着手できず
+`https://dennyu.pref.kagawa.lg.jp/PPI_P/` は同じPPI_P。ただし**運用時間は8:00〜22:00 JST**で、
+時間外はホスト全体が県の案内ページ（www.pref.kagawa.lg.jp/joho/jh-system/dennyu.html）へ302される。
+本セッションは23:45〜翌1:00 JSTだったため実機確認できなかった。
+INSTANCES に `kagawa` を origin だけで登録済み（orgMap未定のため `--discover` しか動かない安全設計）。
+**次回は8:00〜22:00 JSTに `node pipeline/fetch_ppi_p.mjs kagawa --discover` から始める**。
+なお日次ジョブは7:00 JST起動で香川の運用時間外に当たるので、香川は日次に足さず別枠を検討すること。
+
+### 京都府（efftis系）は同じ PPI_P アプリだった — 次回の最有力
+`https://kyoto.efftis.jp/26000/CALS/PPI_P/` は**パス接頭辞が付いただけの同一アプリ**。
+`/26000/` は JIS都道府県コード＋000 のテナント。fetch_ppi_p.mjs に `base`（設置パス）を持たせて対応済み。
+ただし京都は画面のカスタマイズが強く、そのままでは通らない:
+- 検索条件が「情報種別ラジオ（入札公告/入札結果）＋年度 pPI_BNSYEAR ＋団体 pPI_ORGCD」型
+- **選択肢コードに年度が埋まっている**（`2026PPIORG001`＝京都府、`02026PPISPLY00101`＝工事）ので
+  年度ごとに選択肢を読み直す必要がある
+- **団体は21（京都府＋福知山・舞鶴・綾部・宇治・宮津・城陽・向日ほか20市町村）**、区分は工事とコンサルのみ、
+  年度は2021〜2026の6年分。発注機関（部局）は51
+- `PiCtBrFi01`（カテゴリー検索）は500エラー。使うのは `PiCtBrFi02` 系
+efftis系は宮城・富山・三重・京都が相乗りとされているので、**1本で複数県を面取りできる可能性が高い**。
+
+### 偵察して不可・保留にしたもの
+- **大阪市 `www2.keiyaku.city.osaka.lg.jp/OsakaCity-PPI/`: robots.txt が `User-Agent:* Disallow:/`**。
+  取得しない（e-tokyoと同じ扱い）
+- **徳島県 `e-ppi.pref.tokushima.lg.jp/kekka/ankens/…`**: 新しい系統でURLは素直
+  （`/kekka/ankens/front?dantai_code=360000`・`dantai_code`でテナント指定）だが、
+  **一覧にも案件詳細にも落札者・落札金額が無く、入札結果表PDFにしか載らない**。
+  PDF解析は外部依存ゼロの方針と合わないので保留。robots.txt は bingbot の Crawl-delay のみ
+- **電子入札コアシステム型の入札情報公開システム（`/koukai/do/KF001ShowAction`）**: 茨城
+  `ppi.cals-ibaraki.lg.jp` は深夜503、共同ASP `www.epi-cloud.fwd.ne.jp` / `www.epi-asp.fwd.ne.jp`
+  （`?name1=<16桁>` でテナント指定＝**多数の自治体が相乗りしている共有ホスト**）も深夜は503/ECONNRESET。
+  埼玉 `ebidjk2.ebid2.pref.saitama.lg.jp/koukai/do/KF000ShowAction` は深夜も応答あり・robots.txt 404。
+  **日中に再訪する価値が最も高い系統**（ep-bisより相乗り数が多い可能性）
+
+### 運用
+`.github/workflows/daily-local.yml` に `node pipeline/fetch_ppi_p.mjs hiroshima $FY` を追加。
+当年度を丸ごと取り直しても21リクエスト（既知行は UNIQUE 制約で無視される）。稼働時間の制限は見当たらず
+（深夜1:00も応答）、日次7:00 JSTで問題ない。robots.txt は404＝拒否表明なし。
+
+### 次回の一手
+1. **8:00〜22:00 JSTに香川** `node pipeline/fetch_ppi_p.mjs kagawa --discover` → orgMap確定 → `all` で投入
+2. **京都府（efftis系）** を fetch_ppi_p.mjs の年度付きコード対応として実装（21団体・6年度）。
+   通れば efftis の宮城・富山・三重にも同じ手で広げる
+3. **共同ASP `epi-cloud` / `epi-asp`（コアシステム型）を日中に偵察**。`name1` の16桁が何を指すかを特定できれば
+   ep-bis と同様に1ホストで多数の自治体を面取りできる
+4. 神奈川の残り約31,000件・大分の過去年度・福岡のバックフィルは従来どおり日次で自然に埋まる
+5. 長野（700件制限）、EjPCStringChecker系（福井・鹿児島）、兵庫（2026-11以降）は前回のまま
+6. 大阪市・東京e-tokyo は robots.txt により取得しない

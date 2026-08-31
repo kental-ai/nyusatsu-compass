@@ -49,6 +49,9 @@ const slug = pos[0] || 'hiroshima';
 const INST = INSTANCES[slug];
 if (!INST) { console.error(`未知のインスタンス: ${slug}（候補: ${Object.keys(INSTANCES).join(', ')}）`); process.exit(1); }
 const ORIGIN = INST.origin;
+// アプリの設置パス。単独ホストは '' だが、共有ホスト（efftis系）は団体コードを挟む
+// 例: kyoto.efftis.jp/26000/CALS/PPI_P/…
+const BASE = INST.base || '';
 const now0 = new Date();
 const CUR_FY = now0.getMonth() >= 3 ? now0.getFullYear() : now0.getFullYear() - 1;
 const YEARS = (pos[1] === 'all')
@@ -149,8 +152,8 @@ function parseRows(html) {
 
 // ---- main ----
 // 入口を踏んで検索条件画面を出す（jsessionid はURLパスに埋まる）
-await get('/PPI_P/pages/PPI_P/PiCtBrFi02/PiCtBrFi02start.vm');
-const start = await post('/PPI_P/PiCtBrFi02Start.do', { omeProcessName: 'start', omeParameterGroupID: START_GROUP });
+await get(`${BASE}/PPI_P/pages/PPI_P/PiCtBrFi02/PiCtBrFi02start.vm`);
+const start = await post(`${BASE}/PPI_P/PiCtBrFi02Start.do`, { omeProcessName: 'start', omeParameterGroupID: START_GROUP });
 const jsid = (start.html.match(/jsessionid=([^"']+)"/) || [])[1];
 if (!jsid || !/結果ダイレクト検索/.test(start.html)) {
   console.log(`検索条件画面が取得できなかった（運用時間外・仕様変更の可能性。status=${start.status} ${start.location || ''}）。0件で終了`);
@@ -190,7 +193,7 @@ for (const o of orgOpts) {
         rowCount: '100', ppi_backflag: 'direct',
         omeStartPosition: '0', omeEndPosition: '0', omeRecordCount: '0',
       };
-      const r = await post(`/PPI_P/${scr.action};jsessionid=${jsid}`, body);
+      const r = await post(`${BASE}/PPI_P/${scr.action};jsessionid=${jsid}`, body);
       const total = Number((r.html.match(/\/全([\d,]+)件/) || [])[1]?.replaceAll(',', '') ?? 0);
       if (!total) continue;
       const rows = parseRows(r.html);
