@@ -31,6 +31,11 @@ export const INSTANCES = {
   // 香川（かがわ電子入札システム）は同じ PPI_P。運用時間が 8:00〜22:00 JST で、
   // それ以外は県の案内ページへ302される。orgMap 未定のため既定では --discover のみ動く
   kagawa: { origin: 'https://dennyu.pref.kagawa.lg.jp', pref: '香川県' },
+  // 京都（efftis系）は同じ PPI_P アプリが「/<JIS県コード>000/CALS/PPI_P」に設置されたもの。
+  // 検索条件が「年度 pPI_BNSYEAR ＋ 団体 pPI_ORGCD」型で、選択肢コードに年度が埋まっている
+  // （2026PPIORG001＝令和8年度の京都府）ため、年度ごとに検索条件画面を取り直して選択肢を読む。
+  // 団体名は pPI_ORGCD の選択肢ラベルそのもの（京都府・福知山市…）なので orgMap は要らない
+  kyoto: { origin: 'https://kyoto.efftis.jp', base: '/26000/CALS', pref: '京都府', mode: 'year' },
 };
 
 // 調達区分の先頭1桁 → 一覧画面（アクションURLとパラメータグループID）
@@ -126,25 +131,37 @@ const options = (html, name) => {
 };
 
 // 一覧テーブル: ヘッダ行の見出しから列位置を引く（画面ごとに案件名・場所の見出し語が違うだけ）
-const NAME_LABELS = ['工事名', '件名', '業務名', '案件名', '委託名'];
+const NAME_LABELS = ['工事名', '件名', '業務名', '案件名', '案件名称', '委託名'];
+// 一覧テーブル: ヘッダ行の見出しから列位置を引く（設置ごとに見出し語が違うだけで構成は同じ）
+//   広島市: No./契約担当課/開札日/工事名等/場所/落札業者名/落札金額/添付/詳細
+//   京都  : No./調達機関(部局・事務所)/案件名称/開札執行日時/落札業者名/落札金額 (税込：円)/詳細
 function parseRows(html) {
-  const trs = html.match(/<tr>[\s\S]*?<\/tr>/gi) || [];
-  let cols = null;
+  const trs = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  let idx = null; let width = 0;
   const rows = [];
   for (const tr of trs) {
     const ths = [...tr.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map((m) => strip(m[1]));
-    if (ths.length > 5 && ths.includes('落札業者名')) { cols = ths; continue; }
-    if (!cols) continue;
+    if (ths.length > 5 && ths.includes('落札業者名')) {
+      width = ths.length;
+      idx = {
+        dept: ths.findIndex((c) => c.includes('契約担当課') || c.includes('調達機関') || c.includes('発注')),
+        open: ths.findIndex((c) => c.startsWith('開札')),
+        name: ths.findIndex((c) => NAME_LABELS.includes(c)),
+        winner: ths.indexOf('落札業者名'),
+        amount: ths.findIndex((c) => c.startsWith('落札金額')),
+      };
+      continue;
+    }
+    if (!idx) continue;
     const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => strip(m[1]));
-    if (tds.length !== cols.length) continue;
-    const at = (label) => { const i = cols.indexOf(label); return i < 0 ? '' : (tds[i] ?? ''); };
-    const amountAt = cols.findIndex((c) => c.startsWith('落札金額'));
+    if (tds.length !== width) continue;
+    const at = (i) => (i < 0 ? '' : (tds[i] ?? ''));
     rows.push({
-      dept: at('契約担当課'),
-      open_date: waDate(at('開札日')),
-      name: NAME_LABELS.map((l) => at(l)).find((v) => v) || '',
-      winner: at('落札業者名'),
-      amount: amountAt < 0 ? '' : (tds[amountAt] ?? ''),
+      dept: at(idx.dept),
+      open_date: waDate(at(idx.open)),
+      name: at(idx.name),
+      winner: at(idx.winner),
+      amount: at(idx.amount),
     });
   }
   return rows;
@@ -152,19 +169,27 @@ function parseRows(html) {
 
 // ---- main ----
 // 入口を踏んで検索条件画面を出す（jsessionid はURLパスに埋まる）
+const startScreen = (extra = {}) => post(`${BASE}/PPI_P/PiCtBrFi02Start.do`,
+  { omeProcessName: 'start', omeParameterGroupID: START_GROUP, ...extra });
+const jsidOf = (html) => (html.match(/jsessionid=([^"']+)"/) || [])[1];
+
 await get(`${BASE}/PPI_P/pages/PPI_P/PiCtBrFi02/PiCtBrFi02start.vm`);
-const start = await post(`${BASE}/PPI_P/PiCtBrFi02Start.do`, { omeProcessName: 'start', omeParameterGroupID: START_GROUP });
-const jsid = (start.html.match(/jsessionid=([^"']+)"/) || [])[1];
+const start = await startScreen();
+const jsid = jsidOf(start.html);
 if (!jsid || !/結果ダイレクト検索/.test(start.html)) {
   console.log(`検索条件画面が取得できなかった（運用時間外・仕様変更の可能性。status=${start.status} ${start.location || ''}）。0件で終了`);
   process.exit(0);
 }
 const orgOpts = options(start.html, 'pPI_ORGNAME');
 const splyOpts = options(start.html, 'pPI_SPLYNM');
-if (flags.discover || !INST.orgMap) {
+const yearOpts = options(start.html, 'pPI_BNSYEAR');
+const orgCdOpts = options(start.html, 'pPI_ORGCD');
+if (flags.discover || (!INST.orgMap && INST.mode !== 'year')) {
+  if (yearOpts.length) console.log(`[${slug}] 年度: ${yearOpts.map((o) => o.value).join(' / ')}`);
+  if (orgCdOpts.length) console.log(`[${slug}] 団体: ${orgCdOpts.map((o) => `${o.value}=${o.label}`).join(' / ')}`);
   console.log(`[${slug}] 発注機関: ${orgOpts.map((o) => `${o.value}=${o.label}`).join(' / ')}`);
   console.log(`[${slug}] 調達区分: ${splyOpts.map((o) => `${o.value}=${o.label}`).join(' / ')}`);
-  if (!INST.orgMap) console.log('※ orgMap が未定義のため取り込みは行わない（団体名を確定してから INSTANCES に追加すること）');
+  if (!INST.orgMap && INST.mode !== 'year') console.log('※ orgMap が未定義のため取り込みは行わない（団体名を確定してから INSTANCES に追加すること）');
   process.exit(0);
 }
 
@@ -174,41 +199,84 @@ const ins = db.prepare(`INSERT OR IGNORE INTO local_awards
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const nowIso = new Date().toISOString();
 
-console.log(`[${slug}] 年度: ${YEARS[0]}〜${YEARS[YEARS.length - 1]} / 機関${orgOpts.length} / 区分${splyOpts.length} / リクエスト上限${MAXREQ}`);
 let grand = 0; let seenRows = 0; let dropped = 0;
-outer:
-for (const o of orgOpts) {
-  const org = INST.orgMap[o.value];
-  if (!org) { console.log(`  機関 ${o.value}(${o.label}) は orgMap に無いので飛ばす`); continue; }
-  for (const sp of splyOpts) {
-    const scr = SCREENS[Number(sp.value[0])];
-    if (!scr) { console.error(`  未知の画面区分: ${sp.value}`); continue; }
-    for (const fy of YEARS) {
-      if (reqCount >= MAXREQ) { console.log('リクエスト上限に到達'); break outer; }
-      const body = {
-        omeProcessName: 'findList', omeParameterGroupID: scr.group,
-        pPI_ORGNAME: o.value, pPI_SPLYNM: sp.value, pPI_BUKYOKU: '',
-        pPI_TITLE: '', pPI_PLACE: '', pPI_BIDNO: '',
-        pPI_BIDDATE_S: `${fy}/04/01`, pPI_BIDDATE_E: `${fy + 1}/03/31`,
-        rowCount: '100', ppi_backflag: 'direct',
-        omeStartPosition: '0', omeEndPosition: '0', omeRecordCount: '0',
-      };
-      const r = await post(`${BASE}/PPI_P/${scr.action};jsessionid=${jsid}`, body);
-      const total = Number((r.html.match(/\/全([\d,]+)件/) || [])[1]?.replaceAll(',', '') ?? 0);
-      if (!total) continue;
-      const rows = parseRows(r.html);
-      seenRows += rows.length;
-      if (flags.recon) { console.log(`  ${org} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行`); continue; }
-      let n = 0;
-      for (const row of rows) {
-        const amount = Number(Z2H(row.amount).replace(/[^\d]/g, ''));
-        // 落札業者名が空 or 金額が数値でない行は不調・不落
-        if (!row.name || !row.open_date || !row.winner || !amount) { dropped++; continue; }
-        n += ins.run(slug, org, row.dept, INST.pref, row.name, row.open_date,
-          sp.label, '', row.winner, '', amount, classify(row.name), fyOf(row.open_date), nowIso).changes;
+// 一覧の行をDBへ入れる。落札業者名が空 or 金額が数値でない行は不調・不落・中止なので取り込まない
+function absorb(rows, org, category) {
+  let n = 0;
+  for (const row of rows) {
+    const amount = Number(Z2H(row.amount).replace(/[^\d]/g, ''));
+    if (!row.name || !row.open_date || !row.winner || !amount) { dropped++; continue; }
+    n += ins.run(slug, org, row.dept, INST.pref, row.name, row.open_date,
+      category, '', row.winner, '', amount, classify(row.name), fyOf(row.open_date), nowIso).changes;
+  }
+  grand += n;
+  return n;
+}
+const totalOf = (html) => Number((html.match(/\/全([\d,]+)件/) || [])[1]?.replaceAll(',', '') ?? 0);
+const COMMON = { pPI_TITLE: '', pPI_PLACE: '', pPI_BIDNO: '', rowCount: '100', ppi_backflag: 'direct',
+  omeStartPosition: '0', omeEndPosition: '0', omeRecordCount: '0' };
+
+if (INST.mode === 'year') {
+  // 年度＋団体で検索する型（efftis系）。選択肢コードに年度が埋まっているので年度ごとに条件画面を取り直す
+  const avail = yearOpts.map((o) => Number(o.value)).filter(Boolean).sort((a, b) => b - a);
+  const years = (pos[1] === 'all') ? avail : YEARS.filter((y) => avail.includes(y));
+  console.log(`[${slug}] 年度: ${years.join(',')}（公開範囲 ${avail.join(',')}） / 団体${orgCdOpts.length} / 区分${splyOpts.length} / リクエスト上限${MAXREQ}`);
+  outer:
+  for (const fy of years) {
+    const ysc = await startScreen({ pPI_BNSYEAR: String(fy), pPI_ORGCD: '' });
+    const orgs = options(ysc.html, 'pPI_ORGCD');
+    if (!orgs.length) { console.log(`  ${fy}年度: 団体の選択肢が取れなかった（スキップ）`); continue; }
+    for (const o of orgs) {
+      // 調達区分のコードは「年度＋団体」が埋まっている（02026PPISPLY46101＝令和8年度・福知山市・工事）ので
+      // 団体を選び直した検索条件画面から読む。他団体のコードを送っても0件になるだけで気づきにくい
+      const sc = await startScreen({ pPI_BNSYEAR: String(fy), pPI_ORGCD: o.value });
+      const j = jsidOf(sc.html) || jsid;
+      const splys = options(sc.html, 'pPI_SPLYNM');
+      if (!splys.length) { console.log(`  ${o.label} ${fy}年度: 調達区分なし`); continue; }
+      for (const sp of splys) {
+        if (reqCount >= MAXREQ) { console.log('リクエスト上限に到達'); break outer; }
+        const scr = SCREENS[Number(sp.value[0])];
+        if (!scr) { console.error(`  未知の画面区分: ${sp.value}`); continue; }
+        const r = await post(`${BASE}/PPI_P/${scr.action};jsessionid=${j}`, {
+          omeProcessName: 'findList', omeParameterGroupID: scr.group,
+          pPI_BNSYEAR: String(fy), pPI_ORGCD: o.value, pPI_ORGNAME: '', pPI_SPLYNM: sp.value,
+          pPI_ITEMNM: '', pPI_MTHDNM: '', pPI_BIDDATE_S: '', pPI_BIDDATE_E: '', ...COMMON,
+        });
+        const total = totalOf(r.html);
+        if (!total) continue;
+        const rows = parseRows(r.html);
+        seenRows += rows.length;
+        if (flags.recon) { console.log(`  ${o.label} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行`); continue; }
+        const n = absorb(rows, o.label, sp.label);
+        console.log(`  ${o.label} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行 → 新規${n}件`);
       }
-      grand += n;
-      console.log(`  ${org} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行 → 新規${n}件`);
+    }
+  }
+} else {
+  // 開札日の範囲で検索する型（広島市）。発注機関プルダウンの値を orgMap で団体名に読み替える
+  console.log(`[${slug}] 年度: ${YEARS[0]}〜${YEARS[YEARS.length - 1]} / 機関${orgOpts.length} / 区分${splyOpts.length} / リクエスト上限${MAXREQ}`);
+  outer:
+  for (const o of orgOpts) {
+    const org = INST.orgMap[o.value];
+    if (!org) { console.log(`  機関 ${o.value}(${o.label}) は orgMap に無いので飛ばす`); continue; }
+    for (const sp of splyOpts) {
+      const scr = SCREENS[Number(sp.value[0])];
+      if (!scr) { console.error(`  未知の画面区分: ${sp.value}`); continue; }
+      for (const fy of YEARS) {
+        if (reqCount >= MAXREQ) { console.log('リクエスト上限に到達'); break outer; }
+        const r = await post(`${BASE}/PPI_P/${scr.action};jsessionid=${jsid}`, {
+          omeProcessName: 'findList', omeParameterGroupID: scr.group,
+          pPI_ORGNAME: o.value, pPI_SPLYNM: sp.value, pPI_BUKYOKU: '',
+          pPI_BIDDATE_S: `${fy}/04/01`, pPI_BIDDATE_E: `${fy + 1}/03/31`, ...COMMON,
+        });
+        const total = totalOf(r.html);
+        if (!total) continue;
+        const rows = parseRows(r.html);
+        seenRows += rows.length;
+        if (flags.recon) { console.log(`  ${org} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行`); continue; }
+        const n = absorb(rows, org, sp.label);
+        console.log(`  ${org} ${sp.label} ${fy}年度: 全${total}件 / 一覧${rows.length}行 → 新規${n}件`);
+      }
     }
   }
 }

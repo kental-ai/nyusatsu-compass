@@ -46,6 +46,8 @@ jobs:
           node pipeline/fetch_dentyo_p1020.mjs fukuoka --days=30 --max=600 || echo "::warning::fukuoka の取得に失敗（継続）"
           # 広島市（PPI_P系・NEC）は一覧に落札者と金額が載るので当年度を丸ごと取り直しても21リクエストで済む
           node pipeline/fetch_ppi_p.mjs hiroshima $FY || echo "::warning::hiroshima の取得に失敗（継続）"
+          # 京都（efftis系・同じPPI_P）。年度＋団体で検索する型で、当年度の21団体×2区分で約64リクエスト
+          node pipeline/fetch_ppi_p.mjs kyoto $FY || echo "::warning::kyoto の取得に失敗（継続）"
           node pipeline/snapshot_local.mjs export
           # KKJ公告のアーカイブ蓄積（直近7日の新着を取り込み、掲載期間が終わって消える前に保存する）
           node pipeline/archive_notices.mjs import
