@@ -1174,17 +1174,23 @@ ${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
     page(`/local/${pslug}/${city}/`, {
       title: hasA
         ? `${city}の入札結果【${ymLabel(olist[0]?.open_date)}更新・${olist.length.toLocaleString()}件】落札者と落札金額の一覧｜${SITE}`
-        : `${city}の入札情報【直近の公告${ownNotices.length}件・履歴${(ownNotices.length + histOwn.length).toLocaleString()}件】｜${SITE}`,
+        : (ownNotices.length
+          ? `${city}の入札情報【直近の公告${ownNotices.length}件・履歴${(ownNotices.length + histOwn.length).toLocaleString()}件】｜${SITE}`
+          : `${city}の入札情報【公告の履歴${histOwn.length.toLocaleString()}件を収録】｜${SITE}`),
       desc: hasA
         ? `${city}の入札結果（落札者・落札金額）を${ymLabel(olist[0]?.open_date)}分まで${olist.length.toLocaleString()}件収録、毎日更新。落札価格の中央値${yen(median(amounts))}、発注の多い業務、落札の多い企業、直近の入札公告を公開。`
-        : `${city}が発注した入札情報を毎日更新で収録（直近の公告${ownNotices.length}件・公告の履歴${(ownNotices.length + histOwn.length).toLocaleString()}件）。掲載期間が終わって公式サイトで見られなくなった公告も履歴として保持しています。`,
+        : (ownNotices.length
+          ? `${city}が発注した入札情報を毎日更新で収録（直近の公告${ownNotices.length}件・公告の履歴${(ownNotices.length + histOwn.length).toLocaleString()}件）。掲載期間が終わって公式サイトで見られなくなった公告も履歴として保持しています。`
+          : `${city}が発注した入札の公告履歴${histOwn.length.toLocaleString()}件を収録。掲載期間が終わって公式サイトで見られなくなった公告も履歴として保持し、新しい公告が出れば毎日の更新で掲載します。`),
       crumb: [['自治体の入札結果', '/local/'], [prefName, `/local/${pslug}/`], [city, '']],
       lastmod: hasA ? olist[0]?.open_date : (cnotices[0]?.issue_date || chist[0]?.issue_date || BUILT_AT),
       jsonld: hasA ? { '@context': 'https://schema.org', '@type': 'Dataset', name: `${city}の落札実績データ`, description: `${city}の入札結果${olist.length}件`, creator: { '@type': 'Organization', name: SITE } } : null,
       body: `<h1>${hasA ? `${city}の入札結果・入札情報` : `${city}の入札情報`}</h1>
 ${kunSays(hasA
     ? `${city}の入札結果を<b>${olist.length.toLocaleString()}件</b>収録。落札価格の中央値は<b>${yen(median(amounts))}</b>だよ${ownNotices.length ? `。直近の公告は<b>${ownNotices.length}件</b>あるよ!` : ''}`
-    : `${city}が発注した直近の公告は<b>${ownNotices.length}件</b>、過去の公告履歴は<b>${histOwn.length.toLocaleString()}件</b>あるよ。毎日更新しているよ!`)}
+    : (ownNotices.length
+      ? `${city}が発注した直近の公告は<b>${ownNotices.length}件</b>、過去の公告履歴は<b>${histOwn.length.toLocaleString()}件</b>あるよ。毎日更新しているよ!`
+      : `${city}の公告の履歴を<b>${histOwn.length.toLocaleString()}件</b>収録しているよ。新しい公告が出たら毎日の更新で載せるよ!`))}
 ${statBoxes([...(hasA ? [['落札実績', olist.length.toLocaleString() + '件'], ['落札価格の中央値', yen(median(amounts))]] : []), ['直近の公告', ownNotices.length + '件'], ...(chist.length ? [['公告の履歴', chist.length.toLocaleString() + '件']] : [])])}
 ${ownNotices.length ? `<h2>${city}が発注した直近の入札公告</h2>${noticeTable(ownNotices)}` : ''}
 ${natNotices.length ? `<h2>${city}に所在する国の機関等の入札公告</h2>
