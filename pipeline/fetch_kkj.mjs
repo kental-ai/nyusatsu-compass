@@ -9,6 +9,8 @@ import { openDb } from './db.mjs';
 import { classify } from './taxonomy.mjs';
 
 const DELAY = 300;
+// 引数: [日数] または range <from> <to>（アーカイブのバックフィル用。rangeでは窓外削除をしない）
+const RANGE = process.argv[2] === 'range' ? [process.argv[3], process.argv[4]] : null;
 const DAYS = Number(process.argv[2]) || 35;
 const ORG_TOKENS = ['省', '庁', '機構', '大学', '法人', '研究所', 'センター', '裁判所', '議院'];
 
@@ -41,7 +43,7 @@ function parse(xml) {
       issue: (tag(b, 'CftIssueDate') || '').slice(0, 10), deadline: (tag(b, 'TenderSubmissionDeadline') || '').slice(0, 10),
       opening: (tag(b, 'OpeningTendersEvent') || '').slice(0, 10), category: tag(b, 'Category'),
       procedure: tag(b, 'ProcedureType'), cert: tag(b, 'Certification'),
-      url: tag(b, 'ExternalDocumentURI'), desc: tag(b, 'ProjectDescription').slice(0, 4000),
+      url: tag(b, 'ExternalDocumentURI'), desc: RANGE ? '' : tag(b, 'ProjectDescription').slice(0, 4000), // rangeモードはアーカイブ用途で本文不要（メモリ対策）
     };
   });
   return { hits, rows };
@@ -66,8 +68,9 @@ async function collect(baseParams, from, to, out, depth = 0) {
 }
 
 const db = openDb();
-const to = new Date().toISOString().slice(0, 10);
-const from = new Date(Date.now() - DAYS * 86400000).toISOString().slice(0, 10);
+const to = RANGE ? RANGE[1] : new Date().toISOString().slice(0, 10);
+const from = RANGE ? RANGE[0] : new Date(Date.now() - DAYS * 86400000).toISOString().slice(0, 10);
+if (RANGE && !(/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to))) { console.error('range: YYYY-MM-DD YYYY-MM-DD'); process.exit(1); }
 const found = new Map();
 
 // 1) 都道府県コード付き（自治体+所在地コードを持つ国の機関）
@@ -91,8 +94,8 @@ for (const r of found.values()) {
     r.category, r.procedure, r.cert, r.url, r.desc, classify(r.name), now);
   n++;
 }
-// 窓の外に出た古い公告は落とす（「開いている案件の在庫」を保つ）
-const purged = db.prepare(`DELETE FROM notices WHERE issue_date < ?`).run(from);
+// 窓の外に出た古い公告は落とす（「開いている案件の在庫」を保つ）。rangeモード（バックフィル）では削除しない
+const purged = RANGE ? { changes: 0 } : db.prepare(`DELETE FROM notices WHERE issue_date < ?`).run(from);
 db.exec('COMMIT');
 db.prepare(`INSERT OR REPLACE INTO fetch_log (source, key, fetched_at, rows) VALUES (?,?,?,?)`)
   .run('kkj', `${from}/${to}`, now, n);

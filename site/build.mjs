@@ -1194,6 +1194,8 @@ ${chist.length >= 3 ? `<h2>${city}の公告の履歴</h2>
 ${histStats(chist, city)}
 ${histTable(chist)}
 <p class="meta">履歴は当サイトが官公需情報ポータル等から取得し保存したものです。掲載期間終了後の原文は各発注機関にお問い合わせください。</p>` : ''}
+${(() => { const others = [...cityEligible.entries()].filter(([c]) => c !== city).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  return others.length ? `<h2>${prefName}の他の市区町村</h2><p>${others.map(([c]) => `<a href="/local/${pslug}/${encodeURIComponent(c)}/">${esc(c)}</a>`).join(' ／ ')}</p>` : ''; })()}
 <p><a href="/local/${pslug}/">→ ${prefName}全体の入札情報を見る</a></p>`,
     });
   }
