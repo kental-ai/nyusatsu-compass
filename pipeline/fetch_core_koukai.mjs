@@ -180,10 +180,11 @@ const deptOf = (kasho, org) => {
     .split(/[\s　]+/).filter(Boolean);
   const out = [];
   for (const p of parts) {
-    // 括弧を外すのは重複判定のときだけ。「経営課（水道）」のような正当な括弧は残す
-    const bare = /^[（(].*[）)]$/.test(p) ? p.slice(1, -1) : p;
-    if (out.includes(bare) || out.includes(p)) continue;
-    out.push(p);
+    // 括弧を外すのは「（環境局施設部）」のように全体が括弧で括られた重複表記だけ。
+    // 「経営課（水道）」のような語中の括弧は残す
+    const bare = /^[（(][^（(]*[）)]$/.test(p) ? p.slice(1, -1) : p;
+    if (out.includes(bare)) continue;
+    out.push(bare);
   }
   return out.join(' ');
 };
