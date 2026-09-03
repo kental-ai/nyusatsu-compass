@@ -133,6 +133,16 @@ for (const n of histRows) {
   }
 }
 const PROP_RE = /プロポーザル|公募|企画競争|企画提案/; // 「公募・プロポーザル」ページの抽出語彙
+const propPrefOk = new Set(); // /proposal/{pref}/ が生成される県（3件以上）。リンクはこの集合でガード
+for (const [pn, arr] of noticeByPref) {
+  const c = arr.filter((n) => PROP_RE.test(n.name)).length + (histByPref.get(pn) || []).filter((n) => PROP_RE.test(n.name)).length;
+  if (c >= 3) propPrefOk.add(pn);
+}
+for (const [pn, arr] of histByPref) {
+  if (propPrefOk.has(pn)) continue;
+  const c = arr.filter((n) => PROP_RE.test(n.name)).length + (noticeByPref.get(pn) || []).filter((n) => PROP_RE.test(n.name)).length;
+  if (c >= 3) propPrefOk.add(pn);
+}
 const BUILT_AT = new Date().toISOString().slice(0, 10);
 const LABEL = Object.fromEntries(TAXONOMY.map((t) => [t.slug, t.label]));
 
@@ -1209,6 +1219,13 @@ ${statBoxes([...(hasA ? [['落札実績', olist.length.toLocaleString() + '件']
 ${ownNotices.length ? `<h2>${city}が発注した直近の入札公告</h2>${noticeTable(ownNotices)}` : ''}
 ${natNotices.length ? `<h2>${city}に所在する国の機関等の入札公告</h2>
 <p class="meta">発注機関の所在地が${city}の案件です（履行場所は他地域の場合があります）。</p>${noticeTable(natNotices)}` : ''}
+${(() => { const pc = ownNotices.filter((n) => PROP_RE.test(n.name)); const ph = histOwn.filter((n) => PROP_RE.test(n.name));
+  if (pc.length + ph.length < 1) return '';
+  return `<h2>${city}の公募・プロポーザル案件</h2>
+<p>${city}が公募型プロポーザル・企画競争・公募で募集した案件です。提案内容で受注者が決まる方式のため、例年の募集時期を知っておくと先回りの準備ができます。${pc.length ? `現在募集中は<b>${pc.length}件</b>。` : `直近の募集はありませんが、履歴${ph.length}件を収録しています。`}</p>
+${pc.length ? noticeTable(pc) : ''}
+${ph.length ? histTable(ph, 20) : ''}
+<p class="meta"><a href="${propPrefOk.has(prefName) ? `/proposal/${pslug}/` : '/proposal/'}">→ ${propPrefOk.has(prefName) ? `${prefName}全体` : '全国'}の公募・プロポーザル案件を見る</a></p>`; })()}
 ${cityAward}
 ${chist.length >= 3 ? `<h2>${city}の公告の履歴</h2>
 ${histStats(chist, city)}
