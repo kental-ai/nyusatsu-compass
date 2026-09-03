@@ -132,6 +132,7 @@ for (const n of histRows) {
     (histByCity.get(k) ?? histByCity.set(k, []).get(k)).push(n);
   }
 }
+const PROP_RE = /プロポーザル|公募|企画競争|企画提案/; // 「公募・プロポーザル」ページの抽出語彙
 const BUILT_AT = new Date().toISOString().slice(0, 10);
 const LABEL = Object.fromEntries(TAXONOMY.map((t) => [t.slug, t.label]));
 
@@ -1149,6 +1150,8 @@ ${statBoxes([...(hasAwards ? [['落札実績', plist.length.toLocaleString() + '
 ${nlist.length ? `<h2>直近の入札公告</h2>${noticeTable(nlist, { withCity: true })}` : ''}
 ${(() => { const cities = [...cityEligible.entries()].sort((a, b) => b[1] - a[1]).slice(0, 80);
   return cities.length ? `<h2>市区町村別の入札情報</h2><p>${cities.map(([city, n]) => `<a href="/local/${pslug}/${encodeURIComponent(city)}/">${esc(city)}</a>（${n}）`).join(' ／ ')}</p>` : ''; })()}
+${(() => { const pc = (noticeByPref.get(prefName) || []).filter((n) => PROP_RE.test(n.name)).length + (histByPref.get(prefName) || []).filter((n) => PROP_RE.test(n.name)).length;
+  return pc >= 3 ? `<p><a href="/proposal/${pslug}/"><b>→ ${prefName}の公募・プロポーザル案件だけを見る</b>（${pc.toLocaleString()}件）</a></p>` : ''; })()}
 ${awardHtml}
 ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収録予定です。国の機関の落札実績は<a href="/price/">業務別の落札相場</a>から確認できます。</p>` : ''}`,
   });
@@ -1478,6 +1481,52 @@ ${minRows.map(([c, o]) => `<tr><td>${organLink(c, esc(MINISTRIES[c]))}</td><td c
 年をまたいだ連続する2回の落札で法人番号が変わったかを数えました。検証対象は${allPairs.toLocaleString()}回。
 法人番号の無い落札（個人・任意団体等）は除外しています。データは毎日更新され、本ページの数値も自動で再計算されます。</p>
 <p><a href="/contract/">→ 個別の契約ごとの落札履歴（継続契約データベース）</a></p>`,
+  });
+}
+
+// ---------- 公募・プロポーザル案件（都道府県別） ----------
+// 「{県} プロポーザル」「{県} 公募」は企画・コンサル系の検索語彙。案件は収録済みなのに
+// 「入札公告」の語彙に埋もれて拾えていなかったため、専用ページで正対する。
+{
+  const propPrefs = [];
+  for (const prefName of PREFS) {
+    const pslug = PREF_SLUGS[prefName];
+    if (!pslug) continue;
+    const cur = (noticeByPref.get(prefName) || []).filter((n) => PROP_RE.test(n.name));
+    const hist = (histByPref.get(prefName) || []).filter((n) => PROP_RE.test(n.name));
+    if (cur.length + hist.length < 3) continue;
+    propPrefs.push([prefName, pslug, cur.length, hist.length]);
+    const byOrg = new Map();
+    for (const n of [...cur, ...hist]) if (n.org) byOrg.set(n.org, (byOrg.get(n.org) || 0) + 1);
+    const topOrgs = [...byOrg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    page(`/proposal/${pslug}/`, {
+      title: `${prefName}の公募・プロポーザル案件${cur.length ? `【募集中${cur.length}件・履歴${(cur.length + hist.length).toLocaleString()}件】` : `【履歴${hist.length.toLocaleString()}件を収録】`}｜${SITE}`,
+      desc: `${prefName}の公募型プロポーザル・企画競争・公募案件を毎日更新で収録${cur.length ? `。現在募集中${cur.length}件と過去の履歴${hist.length.toLocaleString()}件` : `（履歴${hist.length.toLocaleString()}件）`}。発注機関・公告日・原文リンクつき。掲載期間が終わった案件も履歴として保持しています。`,
+      crumb: [['公募・プロポーザル', '/proposal/'], [prefName, '']],
+      lastmod: cur[0]?.issue_date || hist[0]?.issue_date,
+      body: `<h1>${prefName}の公募・プロポーザル案件</h1>
+${kunSays(cur.length
+    ? `${prefName}で募集中の公募・プロポーザルは<b>${cur.length}件</b>、過去の履歴は<b>${hist.length.toLocaleString()}件</b>あるよ。毎日更新しているよ!`
+    : `${prefName}の公募・プロポーザルの履歴を<b>${hist.length.toLocaleString()}件</b>収録しているよ。新しい募集が出たら毎日の更新で載せるよ!`)}
+${statBoxes([['募集中', cur.length + '件'], ['履歴', (cur.length + hist.length).toLocaleString() + '件'], ['更新', '毎日']])}
+<p>プロポーザル方式（企画競争）は、価格だけでなく<b>企画提案の内容で受注者が決まる</b>調達方式です。
+コンサルティング・計画策定・広報制作・システム企画・調査研究などで多く使われ、価格競争の一般競争入札とは準備も勝ち筋も異なります。
+このページでは${prefName}の機関・自治体が出した公募型プロポーザル・企画競争・公募案件をまとめています。</p>
+${cur.length ? `<h2>募集中の案件</h2>${noticeTable(cur, { withCity: true })}` : ''}
+${hist.length >= 3 ? `<h2>過去の公募・プロポーザル（履歴）</h2>
+<p>例年どの機関が・いつ頃プロポーザルを出しているかは、次年度の先回り準備に使えます。${topOrgs.length ? `件数が多いのは${topOrgs.map(([o, n]) => `${esc(o)}（${n}件）`).join('、')}。` : ''}</p>
+${histTable(hist)}` : ''}
+<p><a href="/local/${pslug}/">→ ${prefName}の入札情報全体を見る</a> ／ <a href="/proposal/">→ 他の都道府県の公募・プロポーザル</a></p>`,
+    });
+  }
+  page('/proposal/', {
+    title: `全国の公募・プロポーザル案件（都道府県別） | ${SITE}`,
+    desc: '公募型プロポーザル・企画競争・公募案件を都道府県別に毎日更新で収録。募集中の案件と、掲載期間が終わった過去案件の履歴。',
+    crumb: [['公募・プロポーザル', '']],
+    body: `<h1>全国の公募・プロポーザル案件</h1>
+${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ。都道府県を選んでね!')}
+<p>プロポーザル方式（企画競争）は価格でなく提案内容で受注者が決まる調達方式です。都道府県別に、募集中の案件と過去の履歴をまとめています。</p>
+<ul>${propPrefs.map(([pn, ps, c, h]) => `<li><a href="/proposal/${ps}/">${pn}の公募・プロポーザル</a>（募集中${c}件・履歴${h.toLocaleString()}件）</li>`).join('')}</ul>`,
   });
 }
 
