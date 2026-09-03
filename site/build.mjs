@@ -340,6 +340,11 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="theme-color" content="#16324F">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <meta name="msvalidate.01" content="AB03214349E5D12EC85FE63B4AA928C6">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1681,6 +1686,7 @@ scat.addEventListener('change',render);spref.addEventListener('change',render);
 writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 // Search Console所有権確認 + IndexNowキー（公開仕様）
 writeFileSync(join(DIST, 'googlea7352c9a5da5cbc1.html'), 'google-site-verification: googlea7352c9a5da5cbc1.html');
+cpSync(join(ROOT, 'site', 'static', 'favicon.ico'), join(DIST, 'favicon.ico')); // ブラウザは /favicon.ico を直接見に来る
 writeFileSync(join(DIST, 'BingSiteAuth.xml'), ['<?xml version="1.0"?>', '<users>', '  <user>AB03214349E5D12EC85FE63B4AA928C6</user>', '</users>', ''].join('\n')); // Bing Webmaster Tools 所有権確認
 writeFileSync(join(DIST, '68c8ff01b5ee8614e56c3a91ccbb8f59.txt'), '68c8ff01b5ee8614e56c3a91ccbb8f59');
 writeFileSync(join(DIST, 'llms.txt'), `# ${SITE}（nyusatsu-compass.com）

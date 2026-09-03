@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <circle cx="60" cy="60" r="58" fill="#16324F"/>
+  <circle cx="60" cy="60" r="46" fill="#FDF6EC"/>
+  <g stroke="#16324F" stroke-width="5" stroke-linecap="round">
+    <line x1="60" y1="20" x2="60" y2="30"/>
+    <line x1="60" y1="90" x2="60" y2="100"/>
+    <line x1="20" y1="60" x2="30" y2="60"/>
+    <line x1="90" y1="60" x2="100" y2="60"/>
+  </g>
+  <g transform="rotate(-40 60 60)">
+    <polygon points="60,24 69,60 51,60" fill="#E8604C"/>
+    <polygon points="60,96 69,60 51,60" fill="#16324F"/>
+  </g>
+  <circle cx="60" cy="60" r="8" fill="#F4B942" stroke="#16324F" stroke-width="4"/>
+</svg>
