@@ -739,7 +739,11 @@ ${g.body(stats)}
     crumb: [['入札ガイド', '']],
     body: `<h1>官公庁入札のはじめ方ガイド</h1>
 ${kunSays('はじめて入札する人が詰まるところを、順番に解説しているよ。数字は全部、当サイトの実データだよ!')}
-<ul>${GUIDES.map((x) => `<li><a href="/guide/${x.slug}/"><b>${esc(x.title.split(' — ')[0])}</b></a><br><span class="meta">${esc(x.desc)}</span></li>`).join('')}</ul>`,
+<ul>${GUIDES.map((x) => `<li><a href="/guide/${x.slug}/"><b>${esc(x.title.split(' — ')[0])}</b></a><br><span class="meta">${esc(x.desc)}</span></li>`).join('')}</ul>
+<h2>都道府県別ガイド</h2>
+<p><a href="/guide/shikaku/"><b>都道府県別 入札参加資格・電子入札の始め方（47都道府県）</b></a></p>
+<h2>データレポート</h2>
+<p><a href="/report/kotai/"><b>官公庁の入札は本当に「いつも同じ業者」なのか — ${(allPairs).toLocaleString()}回の入札の実データ</b></a></p>`,
   });
 }
 
@@ -1055,6 +1059,7 @@ page('/alert/thanks/', {
 // 自治体ページ（落札データのある県 ∪ 公告のある全国47県）
 // 落札=過去の実績、公告=いま出ている案件。両方を1ページに統合する。
 let localCityCount = 0, localPrefCount = 0;
+const cityPagesByPref = new Map(); // 県slug → Set(市区町村名)。生成された市区町村ページの実在集合
 const localByPref = new Map();
 for (const a of LOCALS) (localByPref.get(a.pref) ?? localByPref.set(a.pref, []).get(a.pref)).push(a);
 
@@ -1144,6 +1149,7 @@ ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収�
   });
 
   // 市区町村ページ: 落札30件以上 ∪ 公告5件以上
+  for (const city of cityEligible.keys()) cityPagesByPref.set(pslug, (cityPagesByPref.get(pslug) || new Set()).add(city));
   for (const city of cityEligible.keys()) {
     const olist = plist.filter((a) => a.org === city);
     const cnotices = noticeByCity.get(prefName + '|' + city) || [];
@@ -1336,6 +1342,139 @@ page('/shindan/', {
 </div>
 <script defer src="/assets/shindan.js"></script>`,
 });
+
+// ---------- 都道府県別ガイド（入札参加資格・電子入札の始め方）＋ データレポート ----------
+// 検索需要「{県} 入札参加資格」「{県} 電子入札」に正対する47ページ。共通の制度解説＋県ごとの実データで固有化。
+const SHIKAKU_SYSTEMS = { // 当サイトが実際にデータ取得している電子入札・入札情報システム（確実なものだけ掲載）
+  '千葉県': ['ちば電子調達システム', 'https://www.chiba-ep-bis.supercals.jp/'],
+  '静岡県': ['静岡県の電子入札共同システム（入札情報サービス）', 'https://www.ppi.cals-shiz.jp/'],
+  '宮崎県': ['宮崎県の入札情報サービス', 'https://www.e-nyusatsu-joho.pref.miyazaki.lg.jp/'],
+  '新潟県': ['新潟県の入札情報サービス', 'https://www.ep-bis.pref.niigata.jp/'],
+  '愛媛県': ['愛媛県の入札情報サービス', 'https://www.ebid-ppi.pref.ehime.jp/'],
+  '秋田県': ['秋田県電子入札システム', 'https://cals05.pref.akita.lg.jp/'],
+  '神奈川県': ['かながわ電子入札共同システム', 'https://ebid-joho.e-kanagawa.lg.jp/'],
+};
+const shikakuPrefs = [];
+for (const prefName of PREFS) {
+  const pslug = PREF_SLUGS[prefName];
+  if (!pslug) continue;
+  const cutoff = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const all = [...(noticeByPref.get(prefName) || []), ...(histByPref.get(prefName) || [])]
+    .filter((n) => (n.issue_date || '') >= cutoff);
+  const byCat = new Map(), byOrg = new Map(), byCity = new Map();
+  for (const n of all) {
+    if (n.category) byCat.set(n.category, (byCat.get(n.category) || 0) + 1);
+    if (n.org) byOrg.set(n.org, (byOrg.get(n.org) || 0) + 1);
+    if (n.city) byCity.set(n.city, (byCity.get(n.city) || 0) + 1);
+  }
+  const la = localByPref.get(prefName) || [];
+  const laAmounts = la.map((a) => a.amount).filter((x) => x > 0);
+  const sys = SHIKAKU_SYSTEMS[prefName];
+  const cityPages = cityPagesByPref.get(pslug) || new Set();
+  const topOrgs = [...byOrg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const topCities = [...byCity.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const catLine = [...byCat.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${esc(k)} ${v.toLocaleString()}件`).join('、');
+  shikakuPrefs.push([prefName, pslug, all.length]);
+  const faqs = [
+    [`${prefName}の入札に参加するには何が必要?`,
+      `${prefName}や県内市町村の入札に参加するには、原則として発注する自治体ごと（または県内共同）の入札参加資格審査の申請が必要です。国の機関（${prefName}内の出先機関を含む）の入札には全省庁統一資格を取得します。定期受付の時期は自治体により異なるため、「${prefName} 入札参加資格審査」で公式の案内をご確認ください。`],
+    [`${prefName}ではどのくらい入札の公告が出ている?`,
+      `当サイトの収録では、${prefName}の機関・自治体の入札公告は直近1年間で${all.length.toLocaleString()}件です（官公需情報ポータル連携・毎日更新）。${catLine ? `内訳は${catLine}。` : ''}`],
+  ];
+  page(`/guide/shikaku/${pslug}/`, {
+    title: `${prefName}の入札参加資格と電子入札の始め方【公告${all.length.toLocaleString()}件/年のデータつき】｜${SITE}`,
+    desc: `${prefName}の入札に参加する手順を解説。参加資格審査（自治体）と全省庁統一資格（国）の違い、${sys ? `${sys[0]}、` : ''}直近1年の公告${all.length.toLocaleString()}件の内訳・発注の多い機関${la.length ? `・落札実績${la.length.toLocaleString()}件` : ''}を実データで公開。`,
+    crumb: [['入札ガイド', '/guide/'], ['都道府県別 参加資格ガイド', '/guide/shikaku/'], [prefName, '']],
+    lastmod: all[0]?.issue_date,
+    jsonld: { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) },
+    body: `<h1>${prefName}の入札参加資格と電子入札の始め方</h1>
+${kunSays(`${prefName}の公告は直近1年で<b>${all.length.toLocaleString()}件</b>${la.length ? `、落札結果は<b>${la.length.toLocaleString()}件</b>収録している` : ''}よ。資格の取り方から順番に説明するね!`)}
+${statBoxes([['直近1年の公告', all.length.toLocaleString() + '件'], ...(la.length ? [['収録落札実績', la.length.toLocaleString() + '件'], ['落札価格の中央値', yen(median(laAmounts))]] : []), ['更新', '毎日']])}
+<h2>1. 参加資格は「自治体」と「国」の2系統</h2>
+<p>${prefName}で官公庁入札に参加するには、まず入札参加資格が必要です。資格は大きく2系統に分かれます。</p>
+<ul>
+<li><b>${prefName}・県内市町村の入札</b> — 発注する自治体ごと（または県内共同方式）の入札参加資格審査に申請します。
+建設工事・測量等コンサル・物品/役務で区分が分かれ、定期受付（おおむね2年に1度）と随時受付があります。
+申請先・時期・様式は自治体ごとに異なるため、「${prefName} 入札参加資格審査」で最新の公式案内を確認してください</li>
+<li><b>国の機関の入札</b>（${prefName}内の地方支分部局・国立大学・独立行政法人等） — <b>全省庁統一資格</b>を1回取得すれば
+全省庁で有効です。物品・役務はこの資格で、等級（A〜D）により入札できる案件の規模が決まります。
+詳しくは<a href="/guide/hajimekata/">入札のはじめ方ガイド</a>へ</li>
+</ul>
+<h2>2. ${prefName}の電子入札と案件の探し方</h2>
+<p>${sys ? `${prefName}域の入札情報は<a href="${sys[1]}" rel="noopener">${sys[0]}</a>で公開されており、当サイトはここから毎日データを取得・構造化しています。` : `${prefName}の各自治体の電子入札システム・入札情報サービスは自治体の公式サイトから案内されています。`}
+案件の横断検索は当サイトの<a href="/local/${pslug}/">${prefName}の入札情報</a>（毎日更新）が便利です。
+公告は掲載期間が終わると公式サイトで見られなくなりますが、当サイトは履歴として保持しています。</p>
+<h2>3. ${prefName}の入札市場データ（直近1年）</h2>
+${topOrgs.length ? `<div class="wrap"><table><tr><th>公告の多い機関</th><th>件数</th></tr>
+${topOrgs.map(([o, n]) => `<tr><td>${esc(o)}</td><td class="num">${n.toLocaleString()}</td></tr>`).join(String.fromCharCode(10))}</table></div>` : `<p class="meta">${prefName}の公告データは収集中です。</p>`}
+${topCities.length ? `<p><b>市区町村別:</b> ${topCities.map(([c, n]) => cityPages.has(c) ? `<a href="/local/${pslug}/${encodeURIComponent(c)}/">${esc(c)}</a>（${n}）` : `${esc(c)}（${n}）`).join(' ／ ')}</p>` : ''}
+${la.length ? `<p>${prefName}の<b>落札結果（誰がいくらで落札したか）は${la.length.toLocaleString()}件</b>を収録しています。
+<a href="/local/${pslug}/">→ ${prefName}の入札結果を見る</a></p>` : ''}
+<h2>4. 値付けの前に「相場」を確認する</h2>
+<p>札を入れる前に、類似案件の落札水準を確認しましょう。<a href="/price/">業務別の落札相場</a>と
+<a href="/shindan/">入札機会診断</a>（業種を選ぶだけ・登録不要）で、${prefName}から狙える市場が数分でわかります。</p>
+<h2>よくある質問</h2>
+${faqs.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join(String.fromCharCode(10))}`,
+  });
+}
+page('/guide/shikaku/', {
+  title: `都道府県別 入札参加資格・電子入札の始め方【47都道府県】 | ${SITE}`,
+  desc: '入札参加資格の取り方と電子入札の始め方を都道府県別に解説。各県の直近1年の公告件数・発注の多い機関・落札実績のデータつき。',
+  crumb: [['入札ガイド', '/guide/'], ['都道府県別 参加資格ガイド', '']],
+  body: `<h1>都道府県別 入札参加資格・電子入札の始め方</h1>
+${kunSays('自分の県を選んでね。資格の取り方と、県の入札市場データをまとめてあるよ!')}
+<ul>${shikakuPrefs.map(([pn, ps, n]) => `<li><a href="/guide/shikaku/${ps}/">${pn}の入札参加資格と電子入札の始め方</a>（公告${n.toLocaleString()}件/年）</li>`).join('')}</ul>`,
+});
+
+// データレポート: 被リンク獲得を狙う統計読み物（引用歓迎を明記）
+{
+  const minTurn = new Map(); // 府省 → {pairs, flips}
+  for (const [, arr] of clusters) {
+    const s = [...arr].filter((a) => a.corporate_no).sort((x, y) => (x.award_date < y.award_date ? -1 : 1));
+    if (new Set(s.map((a) => a.award_date.slice(0, 4))).size < 2) continue;
+    for (let i = 1; i < s.length; i++) {
+      if (s[i].award_date.slice(0, 4) === s[i - 1].award_date.slice(0, 4)) continue;
+      const o = minTurn.get(s[i].ministry_code) ?? { pairs: 0, flips: 0 };
+      o.pairs++; if (s[i].corporate_no !== s[i - 1].corporate_no) o.flips++;
+      minTurn.set(s[i].ministry_code, o);
+    }
+  }
+  const catRows = Object.entries(TURNOVER).filter(([sl, o]) => sl !== 'other' && o.pairs >= 300 && LABEL[sl])
+    .sort((a, b) => b[1].rate - a[1].rate);
+  const minRows = [...minTurn.entries()].filter(([c, o]) => MINISTRIES[c] && o.pairs >= 300)
+    .map(([c, o]) => [c, { ...o, rate: Math.round((o.flips / o.pairs) * 100) }])
+    .sort((a, b) => b[1].rate - a[1].rate);
+  page('/report/kotai/', {
+    title: `官公庁の入札は本当に「いつも同じ業者」なのか — ${allPairs.toLocaleString()}回の入札を調べた｜${SITE}`,
+    desc: `「官公庁入札は出来レース」は本当か。毎年繰り返される継続契約${allPairs.toLocaleString()}回の入札を実データで検証したところ、${TURNOVER_ALL}%で落札者が入れ替わっていた。分野別・府省別の入れ替わり率ランキングを公開。引用歓迎。`,
+    crumb: [['データレポート', '']],
+    jsonld: { '@context': 'https://schema.org', '@type': 'Article', headline: `官公庁の入札は本当に「いつも同じ業者」なのか`, author: { '@type': 'Organization', name: SITE }, publisher: { '@type': 'Organization', name: SITE } },
+    body: `<h1>官公庁の入札は本当に「いつも同じ業者」なのか — ${allPairs.toLocaleString()}回の入札を調べた</h1>
+<p class="meta">入札コンパス データレポート ／ 対象: 国の機関の落札実績オープンデータ（2013年度〜）のうち、年をまたいで繰り返し発注された継続契約 ／ 本レポートの数値・図表は<b>出典（入札コンパス・本ページURL）を明記のうえ自由に引用いただけます</b>。</p>
+${kunSays(`結論: 継続契約の入札${allPairs.toLocaleString()}回のうち、<b>${TURNOVER_ALL}%で前年と違う業者が落札</b>していたよ。「いつも同じ業者」は、分野によっては本当で、分野によっては思い込みだよ!`)}
+<h2>結論サマリー</h2>
+<ul>
+<li>毎年繰り返される契約の入札を前年と比べると、<b>${TURNOVER_ALL}%で落札者が交代</b>している（約3件に1件）</li>
+<li>入れ替わりが最も激しいのは<b>${LABEL[catRows[0]?.[0]] || ''}（${catRows[0]?.[1].rate}%）</b>、最も固定的なのは<b>${LABEL[catRows[catRows.length - 1]?.[0]] || ''}（${catRows[catRows.length - 1]?.[1].rate}%）</b></li>
+<li>「同じ業者が取り続けている」契約でも、現在の落札者がまだ1回目という（=固定化していない）契約が約3分の1ある</li>
+</ul>
+<h2>分野別の入れ替わり率ランキング</h2>
+<div class="wrap"><table><tr><th>業務分野</th><th>検証した入札</th><th>入れ替わり率</th></tr>
+${catRows.map(([sl, o]) => `<tr><td><a href="/price/${sl}/">${LABEL[sl]}</a></td><td class="num">${o.pairs.toLocaleString()}回</td><td class="num"><b>${o.rate}%</b></td></tr>`).join(String.fromCharCode(10))}</table></div>
+<h2>府省別の入れ替わり率</h2>
+<div class="wrap"><table><tr><th>府省</th><th>検証した入札</th><th>入れ替わり率</th></tr>
+${minRows.map(([c, o]) => `<tr><td>${organLink(c, esc(MINISTRIES[c]))}</td><td class="num">${o.pairs.toLocaleString()}回</td><td class="num"><b>${o.rate}%</b></td></tr>`).join(String.fromCharCode(10))}</table></div>
+<h2>読み方 — 新規参入を考える会社へ</h2>
+<p>入れ替わり率が高い分野（物品購入・広報・研修など）は、仕様が標準化されていて価格勝負になりやすく、新規でも取りに行く余地が大きい市場です。
+逆に低い分野（除雪・保守点検・通信など）は、地理的条件や既存設備への依存で現職が有利な構造ですが、その中でも「現職1回目」の契約は固定化がまだ進んでいません。
+自社の業種の入れ替わり率と狙い目は<a href="/shindan/">入札機会診断</a>（無料・登録不要）で確認できます。</p>
+<h2>方法論</h2>
+<p>調達ポータルの落札実績オープンデータ（2013年度〜、約31万件）から、案件名を正規化（年度表記・数字・括弧を除去）して同一府省の繰り返し契約に束ね、
+年をまたいだ連続する2回の落札で法人番号が変わったかを数えました。検証対象は${allPairs.toLocaleString()}回。
+法人番号の無い落札（個人・任意団体等）は除外しています。データは毎日更新され、本ページの数値も自動で再計算されます。</p>
+<p><a href="/contract/">→ 個別の契約ごとの落札履歴（継続契約データベース）</a></p>`,
+  });
+}
 
 // about / policy
 page('/about/', {
