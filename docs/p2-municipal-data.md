@@ -863,6 +863,17 @@ User-Agent明示・直列・500ms間隔。1セッションの総リクエスト�
 6. 大阪市・東京e-tokyo は robots.txt により取得しない。徳島はPDFのみで保留
 7. 地域ページの自治体名ゆれ（notices由来。「南相馬氏」「塩竃市」など）は未解消
 
-### 日次ジョブの健全性
-直近3回はすべて success（09-02分は 23:48 UTC）。09-04分（22:00 UTC = 7:00 JST）は
-本セッション開始時点（07:15 JST）で未起動＝**スケジュール起動の遅延が継続**している。
+### 日次ジョブの健全性 — 09-04分は failure。原因を特定して再発防止まで入れた
+09-04分は 23:45 UTC（08:45 JST）起動＝**スケジュール遅延は今回も継続**。
+さらに**最後の push が rejected で failure**になった。原因は、ジョブの実行中（59分かかる）に
+本セッションが main へ push したこと。ジョブは checkout 時点のコミットに積むので
+`git push` が fast-forward できず、**その日の取得が丸ごと捨てられる**。
+
+→ ワークフローの「スナップショットをコミット」ステップに**取り込み直しての再試行（最大3回）**を入れた:
+`git reset --hard HEAD~1` → `git pull --rebase` → `snapshot_local.mjs import` → `export` → 再コミット。
+`import` は `INSERT OR IGNORE` なので、リモートの行と自分の行を含む**上位集合**になり取りこぼさない。
+修正を push したうえで `gh workflow run daily-local.yml` で当日分を再実行した
+（この再実行は新しいコミットで走るので epi-cloud の17srcも初回から乗る）。
+
+**運用上の教訓**: 日次ジョブは 07:00〜09:45 JST に走ることがある。この時間帯に手動 push するときは
+`gh run list --workflow=daily-local.yml --limit 1` で in_progress を確認すること。
