@@ -51,6 +51,11 @@ jobs:
           # 埼玉（電子入札コアシステム型）も落札者・金額が詳細ページにしかなく1件1リクエスト。
           # 一覧は開札日の降順なので、--percap を小さくして69機関に薄く回せば新着から自然に埋まる
           node pipeline/fetch_core_koukai.mjs saitama --from=$FY-04-01 --percap=6 --max=1400 || echo "::warning::saitama の取得に失敗（継続）"
+          # 共有ASP epi-cloud（コアシステムの年度・日付区分世代）。一覧に落札者と金額が載るので安く、
+          # 当年度だけなら1県あたり数十リクエストで済む。17srcで計約900リクエスト
+          for S in aomori iwate miyagi yamagata fukushima shiga wakayama tottori yamaguchi saga nagasaki niigata_epi mie_epi kyoto_epi fukuoka_epi miyazaki_epi okinawa_epi; do
+            node pipeline/fetch_epi_koukai.mjs $S --nendo=$FY --max=200 || echo "::warning::$S の取得に失敗（継続）"
+          done
           node pipeline/snapshot_local.mjs export
           # KKJ公告のアーカイブ蓄積（直近7日の新着を取り込み、掲載期間が終わって消える前に保存する）
           node pipeline/archive_notices.mjs import
