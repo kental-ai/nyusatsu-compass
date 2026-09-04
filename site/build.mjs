@@ -155,7 +155,7 @@ for (const a of AWARDS) {
 }
 const companyName = new Map(COMPANIES.map((c) => [c.corporate_no, c.name]));
 // ページが生成されない対象（企業=落札2件未満・機関=50件未満）にはリンクしない。リンクは必ずこのヘルパー経由にして404を出さない
-const companyHref = (no) => (no && byCompany.has(no) && (byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS) ? `/company/${no}/` : null;
+const companyHref = (no) => (no && (((byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS) || localCompanyPages.has(no))) ? `/company/${no}/` : null;
 const companyLink = (no, label) => companyHref(no) ? `<a href="${companyHref(no)}">${label}</a>` : label;
 const organHref = (code) => (code && MINISTRIES[code] && (byMinistry.get(code) || []).length >= MIN_PRICE_AWARDS) ? `/organ/${code.toLowerCase()}/` : null;
 const organLink = (code, label) => organHref(code) ? `<a href="${organHref(code)}">${label}</a>` : label;
@@ -190,6 +190,49 @@ for (const [key, arr] of clusters) {
     ministry: last.ministry_code, slug: last.slug, name: last.name });
 }
 const contractIdByKey = new Map([...CONTRACTS].map(([id, c]) => [c.key, id]));
+// ---------- 自治体データの二次加工: 継続契約クラスタと自治体オンリー企業 ----------
+// 自治体落札は年数が浅い県が多いため、国（3年以上）より緩い「2年以上」で継続契約とみなす。
+const localClusters = new Map(); // normName|org → local awards[]
+for (const a of LOCALS) {
+  const nn = normName(a.name);
+  if (nn.length < 8 || !a.org) continue;
+  const k = nn + '|' + a.org;
+  (localClusters.get(k) ?? localClusters.set(k, []).get(k)).push(a);
+}
+const LCONTRACTS = new Map(); // id → { key, arr, years, latest, org, pref, slug, name }
+for (const [key, arr] of localClusters) {
+  const years = new Set(arr.map((x) => (x.open_date || '').slice(0, 4)));
+  years.delete('');
+  if (years.size < 2 || arr.length < 2) continue;
+  const sorted = [...arr].sort((x, y) => ((x.open_date || '') < (y.open_date || '') ? 1 : -1));
+  const last = sorted[0];
+  if (!last.name || !last.open_date) continue;
+  LCONTRACTS.set(contractIdOf('L|' + key), { key, arr: sorted, years: years.size,
+    latest: +last.open_date.slice(0, 4), org: last.org, pref: last.pref, slug: last.slug, name: last.name });
+}
+const lcontractIdByKey = new Map([...LCONTRACTS].map(([id, c]) => [c.key, id]));
+const lcByOrg = new Map(); // '県|org' → [[id, c]] 件数順（美郷町のように同名の自治体が複数県にあるため県で修飾）
+for (const [id, c] of LCONTRACTS) { const k = c.pref + '|' + c.org; (lcByOrg.get(k) ?? lcByOrg.set(k, []).get(k)).push([id, c]); }
+for (const [, list] of lcByOrg) list.sort((a, b) => b[1].years - a[1].years || b[1].arr.length - a[1].arr.length);
+const lcByPref = new Map(); // pref → [[id, c]]
+for (const [id, c] of LCONTRACTS) (lcByPref.get(c.pref) ?? lcByPref.set(c.pref, []).get(c.pref)).push([id, c]);
+for (const [, list] of lcByPref) list.sort((a, b) => b[1].years - a[1].years || b[1].arr.length - a[1].arr.length);
+
+// 自治体オンリー企業（国の企業ページが無い法人番号・自治体落札2件以上）
+const localCompanyPages = new Set();
+for (const [no, arr] of byCorpLocal) {
+  if (arr.length < MIN_COMPANY_AWARDS) continue;
+  if ((byCompany.get(no) || []).length >= MIN_COMPANY_AWARDS) continue; // 国ページが既にある
+  localCompanyPages.add(no);
+}
+// 表示名（最頻の落札者名）を companyName に登録（リンクのラベルに使う）
+for (const no of localCompanyPages) {
+  const freq = new Map();
+  for (const a of byCorpLocal.get(no)) if (a.winner_name) freq.set(a.winner_name, (freq.get(a.winner_name) || 0) + 1);
+  const nm = [...freq.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
+  if (nm && !companyName.has(no)) companyName.set(no, nm);
+}
+
 // 分野別の「入れ替わり率」: 年をまたいで繰り返された契約のうち落札者が変わった割合（参入者を動かす反証データ）
 const TURNOVER = {}; // slug → { pairs, flips, firstTermShare }
 {
@@ -565,7 +608,7 @@ ${statBoxes([['実績件数', rlist.length.toLocaleString() + '件'], ['落札�
 ${[...orgAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 20).map(([o, v]) => `<tr><td>${esc(o)}</td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
 <h2>発注時期のパターン</h2>${monthChart(rlist.map((a) => ({ award_date: a.open_date })), `${prefName}の${label}`)}
 <h2>直近の落札事例</h2><div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>自治体</th><th>落札者</th><th>金額</th></tr>
-${rlist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>
+${rlist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${companyLink(a.corporate_no, esc(a.winner_name))}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>
 <p><a href="/price/${cslug}/">→ ${label}の全国（国の機関）の相場を見る</a></p>`,
   });
 }
@@ -644,7 +687,7 @@ ${kunSays(sentences.join(' '))}
 <div class="wrap"><table><tr><th>落札日</th><th>落札者</th><th>落札価格</th><th>前回比</th><th>入札方式</th></tr>
 ${arr.map((a, i) => { const prev = arr[i + 1]; const d = prev && prev.amount > 0 && a.amount > 0 ? Math.round((a.amount / prev.amount - 1) * 100) : null;
   const amt = i === 0 ? yen(a.amount) : gM(yen(a.amount)); const dd = d === null ? '—' : gM(`${d > 0 ? '+' : ''}${d}%`, '●%');
-  return `<tr><td>${a.award_date}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${amt}</td><td class="num">${dd}</td><td>${esc(BIDDING_METHODS[a.method_code] || '')}</td></tr>`; }).join('\n')}</table></div>
+  return `<tr><td>${a.award_date}</td><td>${companyLink(a.corporate_no, esc(a.winner_name))}</td><td class="num">${amt}</td><td class="num">${dd}</td><td>${esc(BIDDING_METHODS[a.method_code] || '')}</td></tr>`; }).join('\n')}</table></div>
 <p class="tbl-note unlock-hide">${arr.length > 1 ? `過去${arr.length - 1}件の落札金額と前回比は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/contract/${id}/`)}` : ''}</p>
 <p class="meta">案件名の年度表記ゆれ（令和◯年度等）を正規化して同一契約として束ねています。別契約が混在する場合は<a href="/policy/">こちら</a>からお知らせください。</p>
 <h2>よくある質問</h2>${faqs.map(([q, a]) => `<h3>Q. ${esc(q)}</h3><p>A. ${esc(a)}</p>`).join('\n')}
@@ -678,6 +721,7 @@ page('/contract/', {
   crumb: [['継続契約', '']],
   body: `<h1>継続契約データベース</h1>
 ${kunSays(`毎年くり返し発注されている契約を<b>${contractCount.toLocaleString()}件</b>束ねたよ。「この契約、誰がいくらで落としてきたか」「次はいつ公告か」が1ページでわかるよ!`)}
+<p><a href="/contract/local/"><b>→ 自治体（県・市町村）の継続契約データベースはこちら</b>（20,000契約超）</a></p>
 <h2>発注機関から探す</h2><ul>${[...contractsByMinistry.entries()].sort((x, y) => y[1].length - x[1].length).map(([mc, l]) => `<li><a href="/contract/${mc.toLowerCase()}/">${esc(MINISTRIES[mc] || mc)}</a>（${l.length.toLocaleString()}契約）</li>`).join('')}</ul>`,
 });
 
@@ -701,7 +745,7 @@ for (const t of TAXONOMY) {
 ${kunSays(`${t.label}で毎年くり返し発注されている継続契約<b>${items.length.toLocaleString()}件</b>について、過去の周期から<b>次の公告が来そうな時期</b>を予測したよ${openN ? `。うち<b>${openN}件</b>はいま公告が出ている可能性があるよ!` : ''}`)}
 <p class="meta">各契約が例年どの時期に公告・落札されているかを、過去の周期から示しています（発注を保証するものではありません）。公告は落札のおおむね1〜2ヶ月前に出ます。前回落札から年度が変わり、次の公告が控えている継続契約を対象にしています。</p>
 <div class="wrap"><table><tr><th>例年の公告時期</th><th>契約名</th><th>発注機関</th><th>前回落札</th><th>前回落札者</th><th>状態</th></tr>
-${items.slice(0, 120).map((i) => `<tr><td>例年${MONTHS_JP[i.pubMonth - 1]}頃</td><td>${contractLink(normName(i.name) + '|' + i.ministry, esc(i.name))}</td><td>${esc(MINISTRIES[i.ministry] || i.ministry)}</td><td class="num">${i.lastYear}年 ${gM(yen(i.amount))}</td><td>${gM(i.lastCorp && byCompany.has(i.lastCorp) && (byCompany.get(i.lastCorp) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${i.lastCorp}/">${esc(i.lastWinner)}</a>` : esc(i.lastWinner), '●●●●')}</td><td>${i.open ? gP('公告中かも') : `${i.years}年連続`}</td></tr>`).join('\n')}</table></div>
+${items.slice(0, 120).map((i) => `<tr><td>例年${MONTHS_JP[i.pubMonth - 1]}頃</td><td>${contractLink(normName(i.name) + '|' + i.ministry, esc(i.name))}</td><td>${esc(MINISTRIES[i.ministry] || i.ministry)}</td><td class="num">${i.lastYear}年 ${gM(yen(i.amount))}</td><td>${gM(companyLink(i.lastCorp, esc(i.lastWinner)), '●●●●')}</td><td>${i.open ? gP('公告中かも') : `${i.years}年連続`}</td></tr>`).join('\n')}</table></div>
 <p class="tbl-note unlock-hide">前回の落札額・落札者は<b>無料会員</b>（メール登録）で表示されます。「公告中かも」の検知はウォッチ会員限定。 ${unlockBtn(`/radar/${t.slug}/`)}</p>
 <p><a href="/price/${t.slug}/">→ ${t.label}の落札相場を見る</a></p>`,
   });
@@ -1121,7 +1165,7 @@ for (const prefName of allPrefs) {
     const topLocal = [...localCorp.values()].sort((x, y) => y.n - x.n).slice(0, 20);
     awardHtml = `<h2>機関別の落札件数</h2><div class="wrap"><table><tr><th>機関</th><th>件数</th><th>合計金額</th></tr>
 ${[...orgAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 45).map(([o, v]) => `<tr><td>${o !== prefName && v.n >= 30 ? `<a href="/local/${pslug}/${encodeURIComponent(o)}/">${esc(o)}</a>` : esc(o)}</td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
-<h2>落札の多い企業</h2><ul>${topLocal.map((v) => `<li>${v.corp && byCompany.has(v.corp) && (byCompany.get(v.corp) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${v.corp}/">${esc(companyName.get(v.corp) || v.name)}</a>` : esc(v.name)}（${v.n}件）</li>`).join('')}</ul>
+<h2>落札の多い企業</h2><ul>${topLocal.map((v) => `<li>${companyLink(v.corp, esc(companyName.get(v.corp) || v.name))}（${v.n}件）</li>`).join('')}</ul>
 <h2>直近の落札</h2><div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>機関</th><th>落札者</th><th>金額</th></tr>
 ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>`;
   }
@@ -1189,10 +1233,10 @@ ${!hasAwards ? `<p class="meta">${prefName}の落札結果データは順次収�
       for (const a of olist) { if (a.slug && a.slug !== 'other') { const o = catAgg.get(a.slug) ?? { n: 0, sum: 0 }; o.n++; o.sum += a.amount || 0; catAgg.set(a.slug, o); } }
       cityAward = `<h2>発注の多い業務</h2><div class="wrap"><table><tr><th>業務</th><th>件数</th><th>合計金額</th></tr>
 ${[...catAgg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 12).map(([s, v]) => `<tr><td>${prefCatPages.has(s + '|' + pslug) ? `<a href="/price/${s}/${pslug}/">${LABEL[s] || s}</a>` : (LABEL[s] || s)}</td><td class="num">${v.n.toLocaleString()}</td><td class="num">${yen(v.sum)}</td></tr>`).join('\n')}</table></div>
-<h2>落札の多い企業</h2><ul>${[...cityCorp.values()].sort((x, y) => y.n - x.n).slice(0, 15).map((v) => `<li>${v.corp && byCompany.has(v.corp) && (byCompany.get(v.corp) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${v.corp}/">${esc(companyName.get(v.corp) || v.name)}</a>` : esc(v.name)}（${v.n}件）</li>`).join('')}</ul>
+<h2>落札の多い企業</h2><ul>${[...cityCorp.values()].sort((x, y) => y.n - x.n).slice(0, 15).map((v) => `<li>${companyLink(v.corp, esc(companyName.get(v.corp) || v.name))}（${v.n}件）</li>`).join('')}</ul>
 <h2>発注時期のパターン</h2>${monthChart(olist.map((a) => ({ award_date: a.open_date })), city)}
 <h2>直近の落札案件</h2><div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>落札者</th><th>金額</th></tr>
-${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${a.corporate_no && byCompany.has(a.corporate_no) && (byCompany.get(a.corporate_no) || []).length >= MIN_COMPANY_AWARDS ? `<a href="/company/${a.corporate_no}/">${esc(a.winner_name)}</a>` : esc(a.winner_name)}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>`;
+${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${companyLink(a.corporate_no, esc(a.winner_name))}</td><td class="num">${yen(a.amount)}</td></tr>`).join('\n')}</table></div>`;
     }
 
     page(`/local/${pslug}/${city}/`, {
@@ -1219,6 +1263,12 @@ ${statBoxes([...(hasA ? [['落札実績', olist.length.toLocaleString() + '件']
 ${ownNotices.length ? `<h2>${city}が発注した直近の入札公告</h2>${noticeTable(ownNotices)}` : ''}
 ${natNotices.length ? `<h2>${city}に所在する国の機関等の入札公告</h2>
 <p class="meta">発注機関の所在地が${city}の案件です（履行場所は他地域の場合があります）。</p>${noticeTable(natNotices)}` : ''}
+${(() => { const lcs = (lcByOrg.get(prefName + '|' + city) || []).slice(0, 12);
+  if (!lcs.length) return '';
+  return `<h2>${city}の毎年出る契約（継続契約）</h2>
+<p>${city}が複数年にわたり繰り返し発注している契約です。歴代の落札者・金額の履歴から「いくらで入れるか」の目安がわかります。</p>
+<ul>${lcs.map(([lid, lc]) => `<li><a href="/contract/local/${lid}/">${esc(lc.name)}</a>（${lc.years}年分）</li>`).join('')}</ul>
+${(lcByOrg.get(prefName + '|' + city) || []).length > 12 && PREF_SLUGS[prefName] && lcByPref.has(prefName) ? `<p class="meta"><a href="/contract/local/${PREF_SLUGS[prefName]}/">→ ${prefName}の継続契約をすべて見る</a></p>` : ''}`; })()}
 ${(() => { const pc = ownNotices.filter((n) => PROP_RE.test(n.name)); const ph = histOwn.filter((n) => PROP_RE.test(n.name));
   if (pc.length + ph.length < 1) return '';
   return `<h2>${city}の公募・プロポーザル案件</h2>
@@ -1545,6 +1595,125 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
 <p>プロポーザル方式（企画競争）は価格でなく提案内容で受注者が決まる調達方式です。都道府県別に、募集中の案件と過去の履歴をまとめています。</p>
 <ul>${propPrefs.map(([pn, ps, c, h]) => `<li><a href="/proposal/${ps}/">${pn}の公募・プロポーザル</a>（募集中${c}件・履歴${h.toLocaleString()}件）</li>`).join('')}</ul>`,
   });
+}
+
+// ---------- 自治体の継続契約ページ（/contract/local/）と自治体オンリー企業ページ ----------
+{
+  const usedTitles = new Set();
+  let lcCount = 0;
+  for (const [id, c] of LCONTRACTS) {
+    lcCount++;
+    const arr = c.arr;
+    const last = arr[0];
+    const prev = arr.find((x) => x !== last && x.amount > 0 && (x.open_date || '').slice(0, 4) !== (last.open_date || '').slice(0, 4));
+    const amounts = arr.map((x) => x.amount).filter((x) => x > 0);
+    const diffTxt = prev && last.amount > 0 && prev.amount > 0
+      ? (last.amount > prev.amount ? `前回から<b>${Math.round((last.amount / prev.amount - 1) * 100)}%上昇</b>` : last.amount < prev.amount ? `前回から<b>${Math.round((1 - last.amount / prev.amount) * 100)}%下落</b>` : '前回と同額')
+      : '';
+    const months = new Map();
+    for (const x of arr) { const m = +(x.open_date || '').slice(5, 7); if (m) months.set(m, (months.get(m) || 0) + 1); }
+    const topMonth = [...months.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const winners = [...new Set(arr.map((x) => x.winner_name).filter(Boolean))];
+    const pslug = PREF_SLUGS[c.pref];
+    let title = `${c.name}の落札結果・落札履歴【${c.org}・${c.years}年分】｜${SITE}`;
+    if (usedTitles.has(title)) title = `${c.name}の落札結果・落札履歴【${c.org}・${c.years}年分・${id.slice(0, 4)}】｜${SITE}`;
+    usedTitles.add(title);
+    page(`/contract/local/${id}/`, {
+      title,
+      desc: `「${c.name}」（${c.org}）の落札結果を${c.years}年分収録。直近は${last.open_date}に${last.winner_name || '—'}が落札。歴代の落札者・金額の推移と例年の時期を、自治体の公表データから構造化して公開。`,
+      crumb: [['継続契約データベース', '/contract/'], ['自治体の継続契約', '/contract/local/'], [c.org, pslug ? `/contract/local/${pslug}/` : '/contract/local/'], [c.name.slice(0, 22), '']],
+      lastmod: last.open_date,
+      jsonld: { '@context': 'https://schema.org', '@type': 'Dataset', name: `${c.name}の落札履歴`, description: `${c.org}の継続契約「${c.name}」の落札結果${arr.length}件`, creator: { '@type': 'Organization', name: SITE } },
+      body: `<h1>${esc(c.name)}</h1>
+<p class="meta">発注: ${esc(c.org)}（${esc(c.pref)}）${c.slug && c.slug !== 'other' && LABEL[c.slug] ? ` ／ 業務分野: <a href="/price/${c.slug}/">${LABEL[c.slug]}</a>` : ''}</p>
+${kunSays(`この契約は<b>${c.years}年分・${arr.length}件</b>の履歴があるよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が落札${diffTxt ? `。${diffTxt}したよ` : 'したよ'}!`)}
+${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(topMonth ? [['例年の時期', `${topMonth}月頃`]] : [])])}
+<h2>値付けの目安</h2>
+<p>直近の落札額は<b>${last.amount > 0 ? yen(last.amount) : '非公表'}</b>${diffTxt ? `（${diffTxt}）` : ''}。${amounts.length >= 3 ? `この契約の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}です。` : ''}
+${topMonth ? `例年<b>${topMonth}月頃</b>に開札されており、公告はその1〜2ヶ月前に出るのが通例です。` : ''}${winners.length >= 2 ? `落札者は${winners.length}社で入れ替わっており、競争のある契約です。` : `落札者は${esc(winners[0] || '—')}が続いています。`}</p>
+<h2>落札の履歴</h2>
+<div class="wrap"><table><tr><th>開札日</th><th>落札者</th><th>落札額</th></tr>
+${arr.slice(0, 12).map((x, i) => `<tr><td>${x.open_date || ''}</td><td>${companyLink(x.corporate_no, esc(x.winner_name || '—'))}</td><td class="num">${i === 0 ? (x.amount > 0 ? yen(x.amount) : '—') : gM(x.amount > 0 ? yen(x.amount) : '—')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
+<p class="tbl-note unlock-hide">2件目以降の落札額は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/contract/local/${id}/`)}</p>
+<p>${pslug ? `<a href="/local/${pslug}/">→ ${esc(c.pref)}の入札情報</a> ／ ` : ''}<a href="/contract/local/">→ 自治体の継続契約データベース</a></p>`,
+    });
+  }
+
+  // 県別ハブ（300件/ページで分割）
+  const LPER = 300;
+  for (const [pref, list] of lcByPref) {
+    const pslug = PREF_SLUGS[pref];
+    if (!pslug) continue;
+    const pages = Math.ceil(list.length / LPER);
+    for (let pg = 0; pg < pages; pg++) {
+      const slice = list.slice(pg * LPER, (pg + 1) * LPER);
+      const nav = pages > 1 ? `<p>${pg > 0 ? `<a href="${pg === 1 ? `/contract/local/${pslug}/` : `/contract/local/${pslug}/page/${pg}/`}">← 前へ</a>　` : ''}${pg + 1} / ${pages}ページ${pg < pages - 1 ? `　<a href="/contract/local/${pslug}/page/${pg + 2}/">次へ →</a>` : ''}</p>` : '';
+      page(pg === 0 ? `/contract/local/${pslug}/` : `/contract/local/${pslug}/page/${pg + 1}/`, {
+        title: `${pref}の継続契約一覧${pg ? `（${pg + 1}ページ目）` : ''}【${list.length.toLocaleString()}件】毎年出る契約と落札履歴｜${SITE}`,
+        desc: `${pref}の自治体が毎年繰り返し発注している継続契約${list.length.toLocaleString()}件。契約ごとの歴代落札者・金額の履歴と例年の時期を公開。`,
+        crumb: [['継続契約データベース', '/contract/'], ['自治体の継続契約', '/contract/local/'], [pref, '']],
+        noindex: pg > 0,
+        body: `<h1>${pref}の継続契約（毎年出る契約）</h1>
+${pg === 0 ? kunSays(`${pref}で毎年繰り返し出ている契約を<b>${list.length.toLocaleString()}件</b>見つけたよ。履歴を見れば「いくらで入れるか」の目安になるよ!`) : ''}
+<ol start="${pg * LPER + 1}">${slice.map(([id, c]) => `<li><a href="/contract/local/${id}/">${esc(c.name)}</a>（${esc(c.org)}・${c.years}年分）</li>`).join('')}</ol>
+${nav}
+<p><a href="/local/${pslug}/">→ ${pref}の入札情報</a></p>`,
+      });
+    }
+  }
+  page('/contract/local/', {
+    title: `自治体の継続契約データベース【${LCONTRACTS.size.toLocaleString()}契約】毎年出る契約と落札履歴 | ${SITE}`,
+    desc: `県・市町村が毎年繰り返し発注している継続契約${LCONTRACTS.size.toLocaleString()}件を都道府県別に収録。契約ごとの歴代落札者・金額の履歴、例年の発注時期を公開。`,
+    crumb: [['継続契約データベース', '/contract/'], ['自治体の継続契約', '']],
+    body: `<h1>自治体の継続契約データベース</h1>
+${kunSays(`県や市町村が毎年出している契約を<b>${LCONTRACTS.size.toLocaleString()}件</b>収録したよ。都道府県を選んでね!`)}
+<ul>${[...lcByPref.entries()].filter(([p]) => PREF_SLUGS[p]).sort((a, b) => b[1].length - a[1].length)
+    .map(([p, l]) => `<li><a href="/contract/local/${PREF_SLUGS[p]}/">${p}の継続契約</a>（${l.length.toLocaleString()}件）</li>`).join('')}</ul>
+<p><a href="/contract/">→ 国の機関の継続契約データベース</a></p>`,
+  });
+
+  // 自治体オンリー企業ページ
+  const usedCompanyTitles = new Set();
+  for (const no of localCompanyPages) {
+    const list = [...byCorpLocal.get(no)].sort((x, y) => ((x.open_date || '') < (y.open_date || '') ? 1 : -1));
+    const name = companyName.get(no) || list[0].winner_name || no;
+    const total = list.reduce((s, a) => s + (a.amount || 0), 0);
+    const orgAgg = new Map(), catAgg = new Map();
+    for (const a of list) {
+      if (a.org) orgAgg.set(a.org, (orgAgg.get(a.org) || 0) + 1);
+      if (a.slug && a.slug !== 'other' && LABEL[a.slug]) catAgg.set(a.slug, (catAgg.get(a.slug) || 0) + 1);
+    }
+    const topOrg = [...orgAgg.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topCat = [...catAgg.entries()].sort((a, b) => b[1] - a[1])[0];
+    const years = [...new Set(list.map((a) => (a.open_date || '').slice(0, 4)))].filter(Boolean).sort();
+    let title = `${name}の入札結果・落札実績【自治体${list.length.toLocaleString()}件】｜${SITE}`;
+    if (usedCompanyTitles.has(title)) title = `${name}の入札結果・落札実績【自治体${list.length.toLocaleString()}件】（法人番号${no}）｜${SITE}`;
+    usedCompanyTitles.add(title);
+    const faqs = [[`${name}の法人番号は?`, `${name}の法人番号は${no}です。当サイトではこの法人番号をキーに、自治体入札の落札実績${list.length.toLocaleString()}件を集計しています。`]];
+    page(`/company/${no}/`, {
+      title,
+      desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${no}）。${topOrg ? `${topOrg[0]}を中心に` : ''}${topCat ? `「${LABEL[topCat[0]]}」分野で` : ''}${years.length ? `${years[0]}〜${years[years.length - 1]}年に` : ''}落札実績があります。落札金額・発注機関をデータで公開。`,
+      crumb: [['落札企業', '/company/'], [name, '']],
+      lastmod: list[0]?.open_date,
+      jsonld: [{ '@context': 'https://schema.org', '@type': 'Organization', name, identifier: no, url: `${ORIGIN}/company/${no}/` },
+        { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) }],
+      body: `<h1>${esc(name)}の入札結果・落札実績</h1>
+<p class="meta">法人番号 ${no}。県・市町村の入札結果公表データに基づく（国の機関での落札実績は未収録または2件未満）。</p>
+${kunSays(`${esc(name)}は${topOrg ? `<b>${esc(topOrg[0])}</b>を中心に` : ''}自治体入札で<b>${list.length.toLocaleString()}件</b>の落札実績があるよ${topCat ? `。主な分野は<b>${LABEL[topCat[0]]}</b>だよ` : ''}!`)}
+${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', total > 0 ? yen(total) : '—'], ['直近の落札', list[0]?.open_date || '—']])}
+<h2>発注機関別の実績</h2>
+<div class="wrap"><table><tr><th>発注機関</th><th>件数</th></tr>
+${[...orgAgg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([o, n]) => `<tr><td>${esc(o)}</td><td class="num">${n}</td></tr>`).join(String.fromCharCode(10))}</table></div>
+<h2>落札の履歴</h2>
+<div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>発注機関</th><th>落札額</th></tr>
+${list.slice(0, 30).map((a, i) => `<tr><td>${a.open_date || ''}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td class="num">${i < 3 ? (a.amount > 0 ? yen(a.amount) : '—') : gM(a.amount > 0 ? yen(a.amount) : '—')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
+<p class="tbl-note unlock-hide">4件目以降の落札額は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/company/${no}/`)}</p>
+<h2>よくある質問</h2>
+${faqs.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join(String.fromCharCode(10))}
+<p>${PREF_SLUGS[list[0]?.pref] ? `<a href="/local/${PREF_SLUGS[list[0].pref]}/">→ ${esc(list[0].pref)}の入札情報</a> ／ ` : ''}<a href="/company/">→ 落札企業データベース</a></p>`,
+    });
+  }
+  console.log(`自治体二次加工: 継続契約${lcCount.toLocaleString()}件 / 自治体オンリー企業${localCompanyPages.size.toLocaleString()}社`);
 }
 
 // about / policy
