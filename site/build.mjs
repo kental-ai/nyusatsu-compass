@@ -1612,7 +1612,9 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
       : '';
     const months = new Map();
     for (const x of arr) { const m = +(x.open_date || '').slice(5, 7); if (m) months.set(m, (months.get(m) || 0) + 1); }
-    const topMonth = [...months.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const topEntry = [...months.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topMonth = topEntry?.[0];
+    const monthSolid = (topEntry?.[1] || 0) >= 2; // 同じ月に2回以上 → 「例年」と言ってよい
     const winners = [...new Set(arr.map((x) => x.winner_name).filter(Boolean))];
     const pslug = PREF_SLUGS[c.pref];
     let title = `${c.name}の落札結果・落札履歴【${c.org}・${c.years}年分】｜${SITE}`;
@@ -1627,10 +1629,10 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
       body: `<h1>${esc(c.name)}</h1>
 <p class="meta">発注: ${esc(c.org)}（${esc(c.pref)}）${c.slug && c.slug !== 'other' && LABEL[c.slug] ? ` ／ 業務分野: <a href="/price/${c.slug}/">${LABEL[c.slug]}</a>` : ''}</p>
 ${kunSays(`この契約は<b>${c.years}年分・${arr.length}件</b>の履歴があるよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が落札${diffTxt ? `。${diffTxt}したよ` : 'したよ'}!`)}
-${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(topMonth ? [['例年の時期', `${topMonth}月頃`]] : [])])}
+${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(topMonth && monthSolid ? [['例年の時期', `${topMonth}月頃`]] : [])])}
 <h2>値付けの目安</h2>
 <p>直近の落札額は<b>${last.amount > 0 ? yen(last.amount) : '非公表'}</b>${diffTxt ? `（${diffTxt}）` : ''}。${amounts.length >= 3 ? `この契約の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}です。` : ''}
-${topMonth ? `例年<b>${topMonth}月頃</b>に開札されており、公告はその1〜2ヶ月前に出るのが通例です。` : ''}${winners.length >= 2 ? `落札者は${winners.length}社で入れ替わっており、競争のある契約です。` : `落札者は${esc(winners[0] || '—')}が続いています。`}</p>
+${topMonth ? (monthSolid ? `例年<b>${topMonth}月頃</b>に開札されており、公告はその1〜2ヶ月前に出るのが通例です。` : `直近は<b>${+(arr[0].open_date || '').slice(5, 7)}月</b>に開札されています（履歴が短いため時期の傾向は参考程度）。`) : ''}${winners.length >= 2 ? `落札者は${winners.length}社で入れ替わっており、競争のある契約です。` : `落札者は${esc(winners[0] || '—')}が続いています。`}</p>
 <h2>落札の履歴</h2>
 <div class="wrap"><table><tr><th>開札日</th><th>落札者</th><th>落札額</th></tr>
 ${arr.slice(0, 12).map((x, i) => `<tr><td>${x.open_date || ''}</td><td>${companyLink(x.corporate_no, esc(x.winner_name || '—'))}</td><td class="num">${i === 0 ? (x.amount > 0 ? yen(x.amount) : '—') : gM(x.amount > 0 ? yen(x.amount) : '—')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
