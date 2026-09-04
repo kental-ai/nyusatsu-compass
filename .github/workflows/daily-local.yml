@@ -66,7 +66,28 @@ jobs:
         run: |
           git config user.name "hojokin-dev"
           git config user.email "hojokin-dev@users.noreply.github.com"
-          git add data/snapshots/
-          git diff --cached --quiet && echo "変更なし" && exit 0
-          git commit -m "自治体データ日次スナップショット更新 [skip netlify]"   # Netlifyの自動ビルドは抑止し、8:00の本ビルドに乗せる（1日1ビルド）
-          git push
+          # Netlifyの自動ビルドは抑止し、8:00の本ビルドに乗せる（1日1ビルド）
+          MSG="自治体データ日次スナップショット更新 [skip netlify]"
+          commit_snapshot() {
+            git add data/snapshots/
+            git diff --cached --quiet && return 1
+            git commit -m "$MSG"
+            return 0
+          }
+          commit_snapshot || { echo "変更なし"; exit 0; }
+          # ジョブの実行中に人手のpushが入ると push が rejected になり、その日の取得が丸ごと落ちる
+          # （2026-09-04に実際に発生）。リモートのスナップショットを取り込み直して作り直す。
+          # import は INSERT OR IGNORE なので、双方の行を含む上位集合になり取りこぼさない
+          for i in 1 2 3; do
+            git push && exit 0
+            echo "::warning::pushがrejected（$i回目）。リモートのスナップショットを取り込んで作り直す"
+            git reset --hard HEAD~1
+            git pull --rebase
+            node pipeline/snapshot_local.mjs import
+            node pipeline/snapshot_local.mjs export
+            node pipeline/archive_notices.mjs import
+            node pipeline/archive_notices.mjs export
+            commit_snapshot || { echo "変更なし"; exit 0; }
+          done
+          echo "::error::スナップショットのpushに3回失敗した"
+          exit 1
