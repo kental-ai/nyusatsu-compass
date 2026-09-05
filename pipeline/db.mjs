@@ -98,7 +98,10 @@ export function openDb() {
       amount      INTEGER,
       slug        TEXT,
       fiscal_year INTEGER,
-      first_seen  TEXT NOT NULL
+      first_seen  TEXT NOT NULL,
+      planned_price INTEGER,                        -- 予定価格（税込・公表分のみ。DENTYO詳細から）
+      floor_price   INTEGER,                        -- 最低制限価格（税込・公表分のみ）
+      bidders       INTEGER                         -- 応札者数
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uq_local ON local_awards (src, org, name, open_date, corporate_no, amount);
     CREATE INDEX IF NOT EXISTS idx_local_corp ON local_awards (corporate_no);
