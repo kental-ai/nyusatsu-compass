@@ -69,7 +69,7 @@ const normDisp = (s) => (s ? String(s).normalize('NFKC').replace(/\s+/g, ' ').tr
 for (const c of COMPANIES) c.name = normDisp(c.name);
 for (const a of AWARDS) a.winner_name = normDisp(a.winner_name);
 let LOCALS = [];
-try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year FROM local_awards ORDER BY open_date DESC`).all(); } catch {}
+try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, planned_price, floor_price, bidders FROM local_awards ORDER BY open_date DESC`).all(); } catch { try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year FROM local_awards ORDER BY open_date DESC`).all(); } catch {} }
 for (const a of LOCALS) a.winner_name = normDisp(a.winner_name);
 const byCorpLocal = new Map();
 for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? byCorpLocal.set(a.corporate_no, []).get(a.corporate_no)).push(a);
@@ -262,6 +262,9 @@ const allPairs = Object.values(TURNOVER).reduce((s, o) => s + o.pairs, 0);
 const allFlips = Object.values(TURNOVER).reduce((s, o) => s + o.flips, 0);
 const TURNOVER_ALL = allPairs ? Math.round((allFlips / allPairs) * 100) : 0;
 const contractLink = (key, label) => { const id = contractIdByKey.get(key); return id ? `<a href="/contract/${id}/">${label}</a>` : label; };
+// 落札率 = 落札額 ÷ 予定価格（どちらも税抜）。公表データがあり0.5〜1.05の妥当域のときだけ返す
+const rateOf = (a) => (a && a.planned_price > 0 && a.amount > 0 && a.amount / a.planned_price >= 0.5 && a.amount / a.planned_price <= 1.05)
+  ? Math.round((a.amount / a.planned_price) * 1000) / 10 : null;
 const monthMode = (list) => {
   const m = {};
   for (const a of list) { const mm = Number(a.award_date?.slice(5, 7)); if (mm) m[mm] = (m[mm] || 0) + 1; }
@@ -1629,13 +1632,13 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
       body: `<h1>${esc(c.name)}</h1>
 <p class="meta">発注: ${esc(c.org)}（${esc(c.pref)}）${c.slug && c.slug !== 'other' && LABEL[c.slug] ? ` ／ 業務分野: <a href="/price/${c.slug}/">${LABEL[c.slug]}</a>` : ''}</p>
 ${kunSays(`この契約は<b>${c.years}年分・${arr.length}件</b>の履歴があるよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が落札${diffTxt ? `。${diffTxt}したよ` : 'したよ'}!`)}
-${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(topMonth && monthSolid ? [['例年の時期', `${topMonth}月頃`]] : [])])}
+${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(rateOf(last) ? [['直近の落札率', rateOf(last) + '%']] : []), ...(last.bidders ? [['直近の応札', last.bidders + '社']] : []), ...(topMonth && monthSolid ? [['例年の時期', `${topMonth}月頃`]] : [])])}
 <h2>値付けの目安</h2>
 <p>直近の落札額は<b>${last.amount > 0 ? yen(last.amount) : '非公表'}</b>${diffTxt ? `（${diffTxt}）` : ''}。${amounts.length >= 3 ? `この契約の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}です。` : ''}
-${topMonth ? (monthSolid ? `例年<b>${topMonth}月頃</b>に開札されており、公告はその1〜2ヶ月前に出るのが通例です。` : `直近は<b>${+(arr[0].open_date || '').slice(5, 7)}月</b>に開札されています（履歴が短いため時期の傾向は参考程度）。`) : ''}${winners.length >= 2 ? `落札者は${winners.length}社で入れ替わっており、競争のある契約です。` : `落札者は${esc(winners[0] || '—')}が続いています。`}</p>
+${topMonth ? (monthSolid ? `例年<b>${topMonth}月頃</b>に開札されており、公告はその1〜2ヶ月前に出るのが通例です。` : `直近は<b>${+(arr[0].open_date || '').slice(5, 7)}月</b>に開札されています（履歴が短いため時期の傾向は参考程度）。`) : ''}${rateOf(last) ? `直近の<b>落札率（予定価格に対する落札額）は${rateOf(last)}%</b>${last.bidders ? `、応札は${last.bidders}社` : ''}でした。予定価格・最低制限価格が公表される契約では、この率が値付けの最重要の手がかりになります。` : ''}${winners.length >= 2 ? `落札者は${winners.length}社で入れ替わっており、競争のある契約です。` : `落札者は${esc(winners[0] || '—')}が続いています。`}</p>
 <h2>落札の履歴</h2>
-<div class="wrap"><table><tr><th>開札日</th><th>落札者</th><th>落札額</th></tr>
-${arr.slice(0, 12).map((x, i) => `<tr><td>${x.open_date || ''}</td><td>${companyLink(x.corporate_no, esc(x.winner_name || '—'))}</td><td class="num">${i === 0 ? (x.amount > 0 ? yen(x.amount) : '—') : gM(x.amount > 0 ? yen(x.amount) : '—')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
+${(() => { const hasRate = arr.slice(0, 12).some((x) => rateOf(x) || x.bidders); return `<div class="wrap"><table><tr><th>開札日</th><th>落札者</th><th>落札額</th>${hasRate ? '<th>落札率</th><th>応札</th>' : ''}</tr>
+${arr.slice(0, 12).map((x, i) => `<tr><td>${x.open_date || ''}</td><td>${companyLink(x.corporate_no, esc(x.winner_name || '—'))}</td><td class="num">${i === 0 ? (x.amount > 0 ? yen(x.amount) : '—') : gM(x.amount > 0 ? yen(x.amount) : '—')}</td>${hasRate ? `<td class="num">${rateOf(x) != null ? (i === 0 ? rateOf(x) + '%' : gM(rateOf(x) + '%')) : '—'}</td><td class="num">${x.bidders ? x.bidders + '社' : '—'}</td>` : ''}</tr>`).join(String.fromCharCode(10))}</table></div>`; })()}
 <p class="tbl-note unlock-hide">2件目以降の落札額は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/contract/local/${id}/`)}</p>
 <p>${pslug ? `<a href="/local/${pslug}/">→ ${esc(c.pref)}の入札情報</a> ／ ` : ''}<a href="/contract/local/">→ 自治体の継続契約データベース</a></p>`,
     });

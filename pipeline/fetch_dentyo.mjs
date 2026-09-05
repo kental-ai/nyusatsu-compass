@@ -160,8 +160,30 @@ function parseRows(html) {
   return rows;
 }
 
-// 詳細HTML（全応札者表）から落札者名と法人番号を取る。摘要が「落札」の行が落札者
+// 詳細HTML（全応札者表）から落札者名・法人番号に加え、予定価格・最低制限価格（いずれも税込）・応札者数を取る。
+// 「摘要」が落札の行が落札者。金額欄の「−」（&#65293;）は非公表。
 function parseDetail(html) {
+  const flat = strip(html);
+  // 一覧の落札額は税抜（詳細の「落札金額（税抜き）」と一致することを実測確認）。分母も税抜で揃える。
+  // 税抜が非公表（−）で税込のみ公表の場合は税込÷1.1で補正する
+  const yenOf = (label) => {
+    const ex = flat.match(new RegExp(label + '（税抜き）\\s*￥([\\d,]+)-'));
+    if (ex) return Number(ex[1].replaceAll(',', ''));
+    const inc = flat.match(new RegExp(label + '（税込み）\\s*￥([\\d,]+)-'));
+    return inc ? Math.round(Number(inc[1].replaceAll(',', '')) / 1.1) : null;
+  };
+  const planned = yenOf('予定価格');
+  const floor = yenOf('最低制限価格');
+  // 応札者数: 「入札参加業者」ヘッダ以降の表で、金額または辞退記号を持つ行を数える
+  let bidders = 0;
+  const at = html.indexOf('入札参加業者');
+  if (at >= 0) {
+    for (const tr of html.slice(at).match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || []) {
+      const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => strip(m[1]));
+      if (tds.length >= 5 && tds[0] && !/入札参加業者/.test(tds[0]) && tds.some((x) => /￥[\d,]+/.test(x))) bidders++;
+    }
+  }
+  let found = null;
   for (const tr of html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || []) {
     const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => strip(m[1]));
     if (tds.length < 4) continue;
@@ -169,9 +191,10 @@ function parseDetail(html) {
     const corp = /^\d{13}$/.test(tds[0]) ? tds[0] : '';
     const name = corp ? tds[1] : tds[0];
     if (!name || /入札参加業者/.test(name)) continue;
-    return { corp_no: corp, winner: name };
+    found = { corp_no: corp, winner: name, planned, floor, bidders: bidders || null };
+    break;
   }
-  return null;
+  return found;
 }
 
 // ---- main ----
@@ -185,11 +208,17 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS uq_local ON local_awards (src, org, name, open_date, corporate_no, amount);
   CREATE INDEX IF NOT EXISTS idx_local_corp ON local_awards (corporate_no);
 `);
+for (const col of ['planned_price INTEGER', 'floor_price INTEGER', 'bidders INTEGER']) {
+  try { db.exec(`ALTER TABLE local_awards ADD COLUMN ${col}`); } catch { /* 追加済み */ }
+}
 // 詳細を取る前に「既に持っている行か」を一覧の情報だけで判定する（詳細1件=1リクエストなので必須）
 const seen = db.prepare('SELECT 1 FROM local_awards WHERE src=? AND org=? AND name=? AND open_date=? AND amount=?');
 const ins = db.prepare(`INSERT OR IGNORE INTO local_awards
-  (src, org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, first_seen)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  (src, org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, first_seen, planned_price, floor_price, bidders)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const upd = db.prepare(`UPDATE local_awards SET planned_price=?, floor_price=?, bidders=?, winner_name=COALESCE(NULLIF(?, ''), winner_name), corporate_no=COALESCE(NULLIF(?, ''), corporate_no)
+  WHERE src=? AND org=? AND name=? AND open_date=? AND amount=?`);
+const needEnrich = db.prepare('SELECT 1 FROM local_awards WHERE src=? AND org=? AND name=? AND open_date=? AND amount=? AND planned_price IS NULL');
 const now = new Date().toISOString();
 
 // 入札結果の検索は団体をまたいで全団体を返す（団体選択は発注部局プルダウンの中身を変えるだけ）。
@@ -220,18 +249,29 @@ for (const g of GYOSHU) {
       for (const r of parseRows(page.text)) {
         if (!r.open_date || !r.name) continue;
         const org = r.org || INST.pref;
-        if (seen.get(slug, org, r.name, r.open_date, r.amount)) continue;
+        const already = seen.get(slug, org, r.name, r.open_date, r.amount);
+        if (already && !(flags.enrich && needEnrich.get(slug, org, r.name, r.open_date, r.amount))) continue;
         if (budgetLeft() < 5) { console.log('  リクエスト上限に到達（詳細取得の途中）'); break; }
         let w = null;
         if (r.kinouId && r.attachNo) {
           const det = await postJson('/DENTYO/api/attached-file/detail-download',
             { kinouId: r.kinouId, attachNo: r.attachNo, tabId }, csrf);
           detailCount++;
+          if (flags['dump-detail'] && det.status === 200) { // 構造調査用: 最初の詳細HTMLを保存して終了
+            const { writeFileSync } = await import('node:fs');
+            writeFileSync(new URL('../data/raw/dentyo_detail_sample.html', import.meta.url), det.text);
+            console.log('詳細HTMLを保存: data/raw/dentyo_detail_sample.html'); process.exit(0);
+          }
           if (det.status === 200) w = parseDetail(det.text);
         }
         if (!w) { noDetail++; continue; } // 落札者が確定できない行（中止・不調等）は載せない
-        n += ins.run(slug, org, r.dept, INST.pref, r.name, r.open_date,
-          r.category, r.method, w.winner, w.corp_no, r.amount, classify(r.name), Number(nendo), now).changes;
+        if (already) { // enrich: 既存行に予定価格・最低制限・応札者数を書き足す
+          upd.run(w.planned, w.floor, w.bidders, w.winner, w.corp_no, slug, org, r.name, r.open_date, r.amount);
+          n++;
+        } else {
+          n += ins.run(slug, org, r.dept, INST.pref, r.name, r.open_date,
+            r.category, r.method, w.winner, w.corp_no, r.amount, classify(r.name), Number(nendo), now, w.planned, w.floor, w.bidders).changes;
+        }
       }
       if (budgetLeft() < 5) break;
     }

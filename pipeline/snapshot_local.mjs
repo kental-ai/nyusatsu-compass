@@ -14,7 +14,9 @@ const mode = process.argv[2];
 const db = openDb();
 
 const COLS = ['src', 'org', 'dept', 'pref', 'name', 'open_date', 'category', 'method',
-  'winner_name', 'corporate_no', 'amount', 'slug', 'fiscal_year', 'first_seen'];
+  'winner_name', 'corporate_no', 'amount', 'slug', 'fiscal_year', 'first_seen',
+  'planned_price', 'floor_price', 'bidders'];
+const NUM_COLS = new Set(['amount', 'fiscal_year', 'planned_price', 'floor_price', 'bidders']);
 const escCsv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s; };
 
 if (mode === 'export') {
@@ -45,7 +47,8 @@ if (mode === 'export') {
   for (const line of lines.slice(1)) {
     if (!line.trim()) continue;
     const v = parseLine(line);
-    ins.run(...COLS.map((c, i) => (c === 'amount' || c === 'fiscal_year' ? Number(v[i]) || 0 : v[i])));
+    while (v.length < COLS.length) v.push(''); // 旧形式（3列追加前）のスナップショットも受ける
+    ins.run(...COLS.map((c, i) => (NUM_COLS.has(c) ? (v[i] === '' || v[i] == null ? (c === 'amount' || c === 'fiscal_year' ? 0 : null) : Number(v[i]) || 0) : v[i])));
     n++;
   }
   db.exec('COMMIT');
