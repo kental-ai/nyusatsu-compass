@@ -1072,7 +1072,10 @@ page('/alert/', {
 <ul><li><b>すべての契約の歴代落札金額と前回比</b>（公式サイトでは消えてしまう過去の結果も）</li>
 <li><b>契約ごとの中央値・価格トレンド</b></li>
 <li><b>類似案件検索の全期間・100件表示</b></li>
-<li>月1回の「あなたの業種の入札機会レポート」</li></ul>
+<li>月1回の「あなたの業種の入札機会レポート」</li>
+<li>無料メール講座「データで勝つ入札講座」全10回</li></ul>
+<p>さらに有料のウォッチ会員には、業種×地域ごとの<b>月次「勝ち筋レポート」</b>（今月の狙い目契約・先月の勝ち札の解剖・落札率の定点観測・来月の公告予測）をお届けします。
+<a href="/report/monthly/sample/"><b>→ レポートの実物を全文公開しています</b></a></p>
 <p class="meta">気になる契約・競合企業・地域を下の欄に書いておくと、結果や公告が出たときにお知らせする即時通知プラン（月9,800円・準備中）の先行案内をお送りします。</p>
 <p id="invalidmsg" class="meta" style="display:none;color:#B8432F">リンクが無効でした。下のフォームから登録し直してください。</p>
 <script>if(new URLSearchParams(location.search).get('invalid'))document.getElementById('invalidmsg').style.display='block';</script>
@@ -1721,7 +1724,213 @@ ${faqs.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join(String.fromCha
   console.log(`自治体二次加工: 継続契約${lcCount.toLocaleString()}件 / 自治体オンリー企業${localCompanyPages.size.toLocaleString()}社`);
 }
 
+// ---------- 月次「勝ち筋レポート」（業種×都道府県セグメント別・有料ウォッチ会員向け） ----------
+// 設計: ../new-biz/docs/monthly-report-spec.md
+// URLは /report/monthly/latest/{業種slug}-{県slug}/ で固定（ステップメールから差し込むため never change）。
+// 中身は毎ビルドで最新月に自動更新される。非会員には事実（先月の動き・相場）を見せ、
+// 未来と答え（狙い目・推定・解剖の分析）は gM/gP でロック。/report/monthly/sample/ は全開放の営業用。
+const REPORT_LESSONS = [
+  ['1月', '年度末の駆け込み発注に備える', `1月から3月は、年度内に予算を使い切るための発注が集中する時期です。当サイトの落札データでも、3月は年間で最も落札件数の多い月になります。この時期の案件は「短納期」「仕様が固まりきっていない」ものが増える一方、競合も年度末の案件を抱えて手が回らないことが多く、応札社数が減る傾向があります。狙うなら、自社の稼働に余裕がある工程を洗い出し、短納期でも受けられる案件を先に決めておくことです。逆に、年度末の無理な受注が翌年度の失注につながる例も多いため、履行体制が組めない案件は見送る判断も同じくらい重要です。`],
+  ['2月', '来年度の「満了予測」を先に押さえる', `4月開始の年間契約は、2月から3月にかけて公告が出ます。つまり今月が、来年度の年間契約を取りに行けるかどうかの分かれ目です。継続契約は「例年ほぼ同じ月」に公告が出るため、過去の履歴から先回りできます。本レポートの「来月の公告予測カレンダー」で、来年度分の公告が近い契約を確認してください。年間契約は1件で年商を左右する規模になることがあり、ここで準備が遅れると1年取り返せません。前年の落札額と落札者、その前年からの増減を今のうちに調べ、参加要件（実績・資格等級・地域要件）を満たしているかを確認しておきましょう。`],
+  ['3月', '年度末の結果を「来年度の教材」にする', `3月は落札結果が最も多く公表される月です。この結果の山を、単なるニュースとして眺めるか、来年度の教材にするかで差がつきます。見るべきは3点。第一に、自社が負けた案件の落札額と落札者。第二に、同じ発注機関で今年新しく入ってきた業者（新規参入がある機関は、来年度も入り込む余地があります）。第三に、落札率の水準です。年度末の駆け込み案件は 競争が緩んで落札率が高く（＝有利に）出る傾向があり、その機関の「平常時の水準」と混同すると来年度の値付けを誤ります。今月の結果は必ず記録に残し、4月に自社の年間戦略へ反映してください。`],
+  ['4月', '新年度は「資格と体制」から', `新年度は入札参加資格の切り替え・更新の時期にあたります。多くの自治体が定期受付を数年に1度行っており、ここを逃すと次の機会まで参加できない発注機関が出てきます。まず自社の資格の有効期限と等級を確認し、更新漏れがないかを点検してください。あわせて、等級を上げられる条件（経営事項審査の点数、実績要件）を満たしているかも見直しどきです。等級が1つ上がると入札できる案件の金額帯が変わり、競合の顔ぶれも変わります。4月は発注そのものは少ない月ですが、この月に整えた体制が1年分の入札機会の上限を決めます。`],
+  ['5月', '発注ピーク前の「狙い先リスト」を固める', `6月から7月にかけて、年度予算に基づく発注が本格化します。5月はその前の準備期間です。やるべきは、闇雲に公告を待つのではなく「取りに行く契約」を先に決めることです。本レポートの「今月の狙い目契約」には、例年この時期に公告が出る契約を、前回の落札額とともに掲載しています。特に「現職1回目」の印がついた契約は、現在の落札者がまだ固定化しておらず、入れ替わりが起きやすい状態です。ここに絞って仕様書の入手・現地確認・見積の下準備を進めておけば、公告が出た瞬間から動けます。`],
+  ['6月', '発注ピーク — 選球眼が利益を決める', `6月から7月は発注件数が年間で最も多くなる時期の一つです。この時期の失敗は「取れる案件を全部追いかけて、どれも中途半端になる」ことです。応札には積算の工数がかかるため、勝率の低い案件に工数を割くほど、本命の精度が落ちます。仕分けの基準は3つ。過去の応札社数（多い＝価格勝負）、現職の連続落札回数（多い＝固定化して勝ち目が薄い）、そして自社の得意工種との距離です。本レポートの「先月の動き一覧」で機関ごとの落札率と応札社数を確認し、激戦区と穴場を見極めてください。`],
+  ['7月', '落札率から自社の「クセ」を点検する', `年度前半の結果が出そろう時期です。ここで一度、自社の応札履歴を落札率の軸で点検してください。負けた案件で、自社の札が落札額より何%高かったか。勝った案件で、最低制限価格からどれだけ離れていたか（＝取りこぼした利益）。この2つを並べると、自社の値付けが「常に高すぎる」のか「勝てているが安すぎる」のかが見えます。多くの中小企業は前者で、経費の積み上げに慣習的な利益率を乗せた結果、市場水準から数%ずれて負け続けます。本レポートの「相場の定点観測」で、あなたの業種×地域の実際の落札率水準と自社の札を突き合わせてください。`],
+  ['8月', '閑散期は「負けた案件」の分析にあてる', `8月は公告・開札とも一時的に落ち着く月です。この閑散期を、上半期に負けた案件の分析にあててください。見るべきは「誰に、いくら差で負けたか」です。僅差で負けているなら値付けの微調整で勝てる可能性が高く、大差なら参入する土俵そのものを見直すべきかもしれません。また、同じ相手に連敗している場合、その競合が特定の機関で強い（過去実績や地の利がある）可能性があります。本レポートの「先月の勝ち札解剖」は、まさにこの「なぜあの会社が勝ったか」を数字で読む訓練です。秋以降の発注に向けて、狙う土俵をここで決め直しましょう。`],
+  ['9月', '補正予算案件を拾う', `9月は補正予算の成立に伴う追加発注が出てくる時期です。補正予算の案件は、当初予算の計画発注と違って準備期間が短く、公告から締切までがタイトになりがちです。裏を返せば、常に情報を見ている会社と、たまにしか見ない会社の差が最も出る案件でもあります。また、災害復旧関連の緊急発注もこの時期に集中します。狙うなら、平時から参加資格と体制を整えておき、公告が出た瞬間に動けるようにしておくことです。本レポートの「先月の動き一覧」で、例年にない案件が出ていないかを確認してください。`],
+  ['10月', '下半期の年間契約を取りに行く', `10月から12月は、翌年1月〜4月開始の業務委託・保守契約の公告が出る時期です。年間契約は複数年にわたって収益の土台になるため、単発工事より優先度を上げるべき案件です。継続契約の場合、前回の落札額と落札者の連続回数が最大の判断材料になります。同じ業者が5年連続で取っている契約に新規で挑むのは分が悪い一方、2〜3年で入れ替わっている契約は十分に勝機があります。当サイトのデータでは、年をまたぐ継続契約の33.1%で落札者が交代しています。「いつも同じ」は、実は3件に2件の話です。`],
+  ['11月', '競合の動きを棚卸しする', `年度の3分の2が経過し、その年の各社の受注状況が見えてくる時期です。競合が既に受注量を確保している場合、年末以降の案件では札が緩む（高めに入れてくる）ことがあります。逆に受注が細い会社は、年度末に向けて無理な安値を入れてくる可能性があります。本レポートの「先月の動き一覧」で、あなたの地域の主要な競合が今年どれだけ取っているかを確認してください。競合の年間受注量は、次の入札での相手の出方を読む最も現実的な材料です。同時に、自社の受注計画の進捗も確認し、年度末に向けた必要受注額を逆算しておきましょう。`],
+  ['12月', '年末年始の公告に備える', `12月から1月にかけては、年度末の執行に向けた公告が出始めます。年末年始は多くの会社が動きを止めるため、この時期に出る公告は競合が手薄になりやすい狙い目です。ただし、締切が年始明けすぐに設定されている案件も多く、休暇中の情報収集を怠ると気づいたときには締切という事態になります。年内に、狙っている契約の例年の公告時期を確認し、年始の動き出しを決めておいてください。あわせて、来年度（4月開始）の年間契約の公告が2月から始まることも念頭に、資格更新や実績要件の準備を年内に片付けておくと、年明けの動きが軽くなります。`],
+];
+
+{
+  // セグメント索引: '県|業種slug' → 落札[]（地域相場ページと同じ localByPrefCat を再利用）
+  const lcByPrefCat = new Map(); // '県|業種slug' → [[id, c]]
+  for (const [id, c] of LCONTRACTS) {
+    if (!c.slug || c.slug === 'other') continue;
+    const k = c.pref + '|' + c.slug;
+    (lcByPrefCat.get(k) ?? lcByPrefCat.set(k, []).get(k)).push([id, c]);
+  }
+  const monthModeOf = (arr) => {
+    const m = new Map();
+    for (const x of arr) { const mm = +(x.open_date || '').slice(5, 7); if (mm) m.set(mm, (m.get(mm) || 0) + 1); }
+    const top = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+    return top ? { month: top[0], n: top[1] } : null;
+  };
+  // 基準月はデータ最新日から決める（カレンダーではなくデータに追従させる）
+  const dataMax = LOCALS.reduce((s, a) => (a.open_date > s ? a.open_date : s), '');
+  const [dy, dm] = dataMax ? [+dataMax.slice(0, 4), +dataMax.slice(5, 7)] : [new Date().getFullYear(), new Date().getMonth() + 1];
+  const prevY = dm === 1 ? dy - 1 : dy, prevM = dm === 1 ? 12 : dm - 1;
+  const nextM = dm === 12 ? 1 : dm + 1;
+  const curKey = `${dy}-${String(dm).padStart(2, '0')}`;
+  const prevKey = `${prevY}-${String(prevM).padStart(2, '0')}`;
+  const [lessonMonth, lessonTitle, lessonBody] = REPORT_LESSONS[dm - 1];
+
+  const segments = [];
+  for (const [key, list] of localByPrefCat) {
+    if (list.length < 50) continue;
+    const [prefName, slug] = key.split('|');
+    if (!PREF_SLUGS[prefName] || !LABEL[slug]) continue;
+    segments.push([`${slug}-${PREF_SLUGS[prefName]}`, prefName, slug, list]);
+  }
+  segments.sort((a, b) => b[3].length - a[3].length);
+
+  const buildReport = (segId, prefName, slug, list, { open = false } = {}) => {
+    const pslug = PREF_SLUGS[prefName], label = LABEL[slug];
+    const lk = (html, tease) => (open ? html : gP(tease));       // 有料ロック（sample版は開放）
+    const mk = (html, plain) => (open ? html : gM(html, plain)); // 無料会員ロック
+    const contracts = lcByPrefCat.get(prefName + '|' + slug) || [];
+
+    // 1) 今月の狙い目契約: 例年の開札月が今月〜来月で、直近年度に未落札のもの
+    const targets = contracts.map(([id, c]) => {
+      const mm = monthModeOf(c.arr);
+      if (!mm) return null;
+      const last = c.arr[0];
+      const lastY = +(last.open_date || '').slice(0, 4);
+      if (lastY >= dy && +(last.open_date || '').slice(5, 7) >= dm) return null; // 今年度分は落札済み
+      const firstTerm = c.arr.length >= 2 && last.winner_name !== c.arr[1].winner_name;
+      return { id, c, month: mm.month, solid: mm.n >= 2, last, firstTerm, amount: last.amount || 0 };
+    }).filter((x) => x && (x.month === dm || x.month === nextM))
+      .sort((a, b) => (b.firstTerm ? 1 : 0) - (a.firstTerm ? 1 : 0) || b.amount - a.amount)
+      .slice(0, 10);
+
+    // 2) 先月の勝ち札解剖: 先月の落札で業者交代が起きた契約（予定価格つきを優先）
+    let autopsy = null;
+    for (const [id, c] of contracts) {
+      const cur = c.arr[0], prev = c.arr[1];
+      if (!cur || !prev || !(cur.open_date || '').startsWith(prevKey)) continue;
+      if (!cur.winner_name || cur.winner_name === prev.winner_name) continue;
+      if (!(cur.amount > 0 && prev.amount > 0)) continue;
+      const cand = { id, c, cur, prev, rate: rateOf(cur) };
+      if (!autopsy || (cand.rate && !autopsy.rate) || (cand.rate && cand.cur.amount > autopsy.cur.amount)) autopsy = cand;
+    }
+
+    // 3) 先月の動き一覧
+    const lastMonth = list.filter((a) => (a.open_date || '').startsWith(prevKey))
+      .sort((a, b) => (b.amount || 0) - (a.amount || 0));
+    // 4) 相場の定点観測
+    const amtsPrev = lastMonth.map((a) => a.amount).filter((x) => x > 0);
+    const amtsCur = list.filter((a) => (a.open_date || '').startsWith(curKey)).map((a) => a.amount).filter((x) => x > 0);
+    const rated = list.filter((a) => rateOf(a) != null);
+    const rates = rated.map((a) => rateOf(a)).sort((a, b) => a - b);
+    const avgRate = rates.length ? Math.round(rates.reduce((s, x) => s + x, 0) / rates.length * 10) / 10 : null;
+    const nearFloor = rates.length ? Math.round(rates.filter((r) => r >= 85).length / rates.length * 100) : null;
+    const bidders = list.map((a) => a.bidders).filter((x) => x > 0);
+    const avgBid = bidders.length ? Math.round(bidders.reduce((s, x) => s + x, 0) / bidders.length * 10) / 10 : null;
+    // 6) 来月の公告予測
+    const nextPub = contracts.map(([id, c]) => {
+      const mm = monthModeOf(c.arr);
+      if (!mm) return null;
+      const pubM = ((mm.month + 10) % 12) + 1; // 開札の1〜2ヶ月前が公告
+      return pubM === nextM || mm.month === nextM ? { id, c, month: mm.month, last: c.arr[0] } : null;
+    }).filter(Boolean).sort((a, b) => (b.last.amount || 0) - (a.last.amount || 0)).slice(0, 12);
+
+    return `${kunSays(`${prefName}の<b>${label}</b>、${dy}年${dm}月号だよ! 先月の動きは<b>${lastMonth.length.toLocaleString()}件</b>、今月の狙い目の契約は<b>${targets.length}件</b>見つけたよ。`)}
+${statBoxes([['対象', `${prefName}×${label}`], ['収録実績', list.length.toLocaleString() + '件'], ['先月の落札', lastMonth.length + '件'],
+  ...(avgRate ? [['平均落札率', avgRate + '%']] : []), ...(avgBid ? [['平均応札', avgBid + '社']] : [])])}
+
+<h2>1. 今月の狙い目契約</h2>
+${targets.length ? `<p>例年この時期（${MONTHS_JP[dm - 1]}〜${MONTHS_JP[nextM - 1]}）に開札されている継続契約のうち、今年度まだ落札が確認できていないものです。<b>「現職1回目」</b>は現在の落札者がまだ固定化しておらず、入れ替わりが起きやすい状態を示します。</p>
+<div class="wrap"><table><tr><th>契約</th><th>発注機関</th><th>例年の開札</th><th>前回の落札額</th><th>状態</th></tr>
+${targets.map((t) => `<tr><td><a href="/contract/local/${t.id}/">${esc(t.c.name)}</a></td><td>${esc(t.c.org)}</td><td>${MONTHS_JP[t.month - 1]}頃</td><td class="num">${mk(t.amount > 0 ? yen(t.amount) : '—', '●●●万円')}</td><td>${t.firstTerm ? lk('<b>現職1回目</b>（狙い目）', '狙い目度') : `${t.c.years}年連続`}</td></tr>`).join(String.fromCharCode(10))}</table></div>` : `<p class="meta">今月〜来月に開札時期が来る継続契約は、現時点で検出されていません。来月号をお待ちください。</p>`}
+
+<h2>2. 先月の「勝ち札」解剖</h2>
+${autopsy ? `<p>先月、${prefName}の${label}分野で<b>落札者の交代</b>が起きた契約を1件、数字で解剖します。</p>
+<div class="wrap"><table><tr><th></th><th>前回</th><th>今回（${prevM}月）</th></tr>
+<tr><td>落札者</td><td>${esc(autopsy.prev.winner_name || '—')}</td><td><b>${esc(autopsy.cur.winner_name)}</b></td></tr>
+<tr><td>落札額</td><td class="num">${yen(autopsy.prev.amount)}</td><td class="num">${yen(autopsy.cur.amount)}</td></tr>
+${autopsy.rate ? `<tr><td>落札率</td><td class="num">—</td><td class="num">${lk(`<b>${autopsy.rate}%</b>`, '◯◯%')}</td></tr>` : ''}
+${autopsy.cur.bidders ? `<tr><td>応札社数</td><td class="num">—</td><td class="num">${autopsy.cur.bidders}社</td></tr>` : ''}
+</table></div>
+<p><b>読み方:</b> 「${esc(autopsy.c.name)}」（${esc(autopsy.c.org)}）は、前回${esc(autopsy.prev.winner_name || '—')}が${yen(autopsy.prev.amount)}で落札していた契約です。
+今回は${esc(autopsy.cur.winner_name)}が${yen(autopsy.cur.amount)}で奪取しました（前回比 ${autopsy.cur.amount < autopsy.prev.amount ? `<b>△${Math.round((1 - autopsy.cur.amount / autopsy.prev.amount) * 100)}%</b>` : `<b>+${Math.round((autopsy.cur.amount / autopsy.prev.amount - 1) * 100)}%</b>`}）。
+${lk(autopsy.rate ? `挑戦者が狙ったのは「前回の額」ではなく<b>今年の予定価格の${autopsy.rate}%</b>という水準です。${autopsy.cur.bidders ? `${autopsy.cur.bidders}社が応札した中で、` : ''}勝敗を分けたのは値付けの置き場所でした。同じ機関の同種契約では、この水準が次回以降の目安になります。` : `この規模・分野で交代が起きたということは、現職が守り切れる構造ではないという証拠です。同じ機関の類似契約も、挑戦の余地があります。`, '（分析はウォッチ会員限定）')}</p>
+<p class="meta"><a href="/contract/local/${autopsy.id}/">→ この契約の全履歴を見る</a></p>` : `<p class="meta">先月、この分野で落札者の交代は検出されませんでした（現職が守り切った月です）。</p>`}
+
+<h2>3. 先月の動き一覧</h2>
+${lastMonth.length ? `<div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>発注機関</th><th>落札者</th><th>落札額</th>${rated.length ? '<th>落札率</th>' : ''}</tr>
+${lastMonth.slice(0, 40).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td>${companyLink(a.corporate_no, esc(a.winner_name || '—'))}</td><td class="num">${a.amount > 0 ? yen(a.amount) : '—'}</td>${rated.length ? `<td class="num">${rateOf(a) != null ? lk(rateOf(a) + '%', '◯◯%') : '—'}</td>` : ''}</tr>`).join(String.fromCharCode(10))}</table></div>
+${lastMonth.length > 40 ? `<p class="meta">ほか${(lastMonth.length - 40).toLocaleString()}件。</p>` : ''}` : `<p class="meta">先月の落札は収録されていません。</p>`}
+
+<h2>4. 相場の定点観測</h2>
+<div class="wrap"><table><tr><th>指標</th><th>値</th><th>読み方</th></tr>
+<tr><td>先月の落札額の中央値</td><td class="num">${amtsPrev.length ? yen(median(amtsPrev)) : '—'}</td><td>この分野・地域の標準的な案件規模</td></tr>
+<tr><td>今月（${dm}月）の中央値</td><td class="num">${amtsCur.length ? yen(median(amtsCur)) : '集計中'}</td><td>${amtsPrev.length && amtsCur.length ? (median(amtsCur) > median(amtsPrev) ? '先月より大型案件が多い' : '先月より小型案件が中心') : '月初は件数が少なく参考値'}</td></tr>
+${avgRate ? `<tr><td>平均落札率</td><td class="num">${lk(avgRate + '%', '◯◯%')}</td><td>予定価格に対する落札額。札の置き場所の基準</td></tr>
+<tr><td>落札率85%以上の割合</td><td class="num">${lk(nearFloor + '%', '◯◯%')}</td><td>高いほど競争が緩い（値引き競争になっていない）</td></tr>` : ''}
+${avgBid ? `<tr><td>平均応札社数</td><td class="num">${avgBid}社</td><td>多いほど価格勝負。3社以下なら要件で絞られている</td></tr>` : ''}
+</table></div>
+${!avgRate ? `<p class="meta">※落札率・応札社数は、予定価格を公表している発注機関の案件のみ集計しています（収録拡大中）。</p>` : ''}
+
+<h2>5. 今月のレッスン — ${esc(lessonTitle)}</h2>
+<p>${lessonBody}</p>
+
+<h2>6. 来月（${MONTHS_JP[nextM - 1]}）の公告予測カレンダー</h2>
+${nextPub.length ? `<p>過去の周期から、来月に公告または開札が来ると見込まれる継続契約です。公告は開札のおおむね1〜2ヶ月前に出ます。</p>
+<div class="wrap"><table><tr><th>契約</th><th>発注機関</th><th>例年の開札</th><th>前回の落札額</th></tr>
+${nextPub.map((t) => `<tr><td><a href="/contract/local/${t.id}/">${esc(t.c.name)}</a></td><td>${esc(t.c.org)}</td><td>${MONTHS_JP[t.month - 1]}頃</td><td class="num">${mk(t.last.amount > 0 ? yen(t.last.amount) : '—', '●●●万円')}</td></tr>`).join(String.fromCharCode(10))}</table></div>` : `<p class="meta">来月に予測される公告は、現時点で検出されていません。</p>`}
+<p class="meta">本レポートは${prefName}の公表データ${list.length.toLocaleString()}件をもとに毎月自動生成しています。数値は発注機関の公表内容に基づくもので、発注や落札を保証するものではありません。</p>`;
+  };
+
+  // セグメント別レポート（固定URL・毎月自動更新）
+  let reportCount = 0;
+  for (const [segId, prefName, slug, list] of segments) {
+    reportCount++;
+    page(`/report/monthly/latest/${segId}/`, {
+      title: `${prefName}の${LABEL[slug]}入札 勝ち筋レポート ${dy}年${dm}月号｜${SITE}`,
+      desc: `${prefName}の${LABEL[slug]}分野の入札を毎月分析。今月の狙い目契約、先月の落札者交代（勝ち札）の解剖、落札率の定点観測、来月の公告予測を実データから自動生成。ウォッチ会員向け月次レポート。`,
+      crumb: [['勝ち筋レポート', '/report/monthly/'], [`${prefName}×${LABEL[slug]}`, '']],
+      lastmod: dataMax,
+      body: `<h1>${prefName}の${LABEL[slug]}入札 勝ち筋レポート <span class="meta">${dy}年${dm}月号</span></h1>
+${buildReport(segId, prefName, slug, list)}
+<p class="tbl-note unlock-hide">狙い目の判定・落札率・勝ち札の分析は<b>ウォッチ会員</b>限定です。 ${unlockBtn(`/report/monthly/latest/${segId}/`)}</p>
+<p><a href="/report/monthly/">→ 他の地域・業種のレポート</a> ／ <a href="/local/${PREF_SLUGS[prefName]}/">→ ${prefName}の入札情報</a></p>`,
+    });
+  }
+
+  // 全開放のサンプル（営業・SEO・ステップメール5通目の試食用）
+  if (segments.length) {
+    // サンプルは「落札率データが最も多いセグメント」を選ぶ（目玉の指標が出ている状態で見せる）
+    const withRate = [...segments].sort((a, b) =>
+      b[3].filter((x) => rateOf(x) != null).length - a[3].filter((x) => rateOf(x) != null).length
+      || b[3].length - a[3].length);
+    const [sid, spref, sslug, slist] = withRate[0];
+    page('/report/monthly/sample/', {
+      title: `【サンプル全文公開】入札 勝ち筋レポートの中身 — ${spref}の${LABEL[sslug]} ${dy}年${dm}月号｜${SITE}`,
+      desc: `毎月お届けする入札「勝ち筋レポート」の実物を1本、全文公開します。今月の狙い目契約、先月の勝ち札を数字で解剖、落札率の定点観測、来月の公告予測まで。${spref}の${LABEL[sslug]}分野の実データ版。`,
+      crumb: [['勝ち筋レポート', '/report/monthly/'], ['サンプル全文', '']],
+      lastmod: dataMax,
+      body: `<h1>【サンプル全文公開】入札 勝ち筋レポートの中身</h1>
+<p class="meta">ウォッチ会員に毎月お届けしているレポートの実物です。通常は会員限定の数値もすべて開いた状態で公開しています（${spref}×${LABEL[sslug]}版・${dy}年${dm}月号）。会員の方には、<b>あなたの業種×地域</b>のレポートが毎月届きます。</p>
+${buildReport(sid, spref, sslug, slist, { open: true })}
+<h2>このレポートが毎月、あなたの市場版で届きます</h2>
+<p>対象は${segments.length}の業種×地域の組み合わせ。毎月、データから自動生成しています。
+狙い目契約の判定、落札率の水準、勝ち札の解剖——札を入れる前に見るべき数字を、探しに行かなくても手元に届く形にしました。</p>
+<p>${unlockBtn('/report/monthly/sample/')}</p>
+<p><a href="/report/monthly/">→ 対象の地域・業種一覧</a></p>`,
+    });
+  }
+
+  // ハブ
+  const byPref = new Map();
+  for (const [segId, prefName, slug, list] of segments) (byPref.get(prefName) ?? byPref.set(prefName, []).get(prefName)).push([segId, slug, list.length]);
+  page('/report/monthly/', {
+    title: `入札 勝ち筋レポート（業種×地域の月次分析・${segments.length}セグメント）｜${SITE}`,
+    desc: `業種×都道府県ごとに、今月の狙い目契約・先月の勝ち札解剖・落札率の定点観測・来月の公告予測を毎月自動生成。サンプル全文公開中。`,
+    crumb: [['勝ち筋レポート', '']],
+    body: `<h1>入札 勝ち筋レポート</h1>
+${kunSays(`業種×地域ごとに毎月の「狙い目」と「勝ち札の読み方」をまとめたレポートだよ。<b>${segments.length}通り</b>を毎月自動で作っているよ!`)}
+<p>札を入れる前に見るべき数字——今月どの契約が狙えるのか、先月は誰がいくらで勝ったのか、落札率の水準はどう動いたか、来月は何の公告が出るのか。毎月、データから自動生成しています。</p>
+<p><a class="btn" href="/report/monthly/sample/">サンプルを全文で読む</a></p>
+<h2>対象の地域・業種</h2>
+${[...byPref.entries()].sort((a, b) => b[1].length - a[1].length).map(([pn, l]) => `<h3>${esc(pn)}</h3><p>${l.sort((a, b) => b[2] - a[2]).map(([segId, slug, n]) => `<a href="/report/monthly/latest/${segId}/">${LABEL[slug]}</a>（${n.toLocaleString()}件）`).join(' ／ ')}</p>`).join(String.fromCharCode(10))}`,
+  });
+  console.log(`月次レポート: ${reportCount}セグメント + サンプル + ハブ（${dy}年${dm}月号）`);
+}
+
 // about / policy
+
 page('/about/', {
   title: `運営者情報・データについて | ${SITE}`,
   desc: '入札コンパスの運営者情報。調達ポータルの落札実績オープンデータと官公需情報ポータルを毎日取得し、契約・企業・機関・地域の切り口で構造化して公開しています。',
