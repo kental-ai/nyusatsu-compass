@@ -10,7 +10,10 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { openDb } from './db.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SNAP = join(ROOT, 'data', 'snapshots', 'notices_archive.csv.gz');
+const SNAP_DIR = join(ROOT, 'data', 'snapshots');
+const SNAP = join(SNAP_DIR, 'notices_archive.csv.gz');            // 現行年＋日付不明分（毎日更新）
+const yearSnap = (y) => join(SNAP_DIR, `notices_archive_${y}.csv.gz`); // 過去年（凍結・再書き込みしない）
+const CUR_YEAR = new Date().getFullYear();
 const mode = process.argv[2];
 const db = openDb();
 
@@ -26,15 +29,37 @@ if (mode === 'absorb') {
   const c = db.prepare('SELECT COUNT(*) c FROM notices_archive').get();
   console.log(`absorb: notices → archive（累計${c.c}件）`);
 } else if (mode === 'export') {
-  const rows = db.prepare(`SELECT ${COLS.join(',')} FROM notices_archive ORDER BY issue_date, key`).all();
-  const csv = [COLS.join(','), ...rows.map((r) => COLS.map((c) => escCsv(r[c])).join(','))].join('\n');
-  mkdirSync(dirname(SNAP), { recursive: true });
-  const gz = gzipSync(Buffer.from(csv, 'utf8'), { level: 9 });
-  writeFileSync(SNAP, gz);
-  console.log(`export: ${rows.length}行 → ${SNAP}（${Math.round(gz.length / 1024)}KB）`);
+  // 年別に分割して書き出す。過去年のファイルは一度作ったら凍結（毎日のgit差分を現行年だけに抑える）
+  mkdirSync(SNAP_DIR, { recursive: true });
+  const years = db.prepare(`SELECT DISTINCT substr(issue_date, 1, 4) y FROM notices_archive
+    WHERE issue_date >= '2000' ORDER BY y`).all().map((r) => r.y).filter((y) => Number(y) < CUR_YEAR);
+  const dump = (rows, file) => {
+    const csv = [COLS.join(','), ...rows.map((r) => COLS.map((c) => escCsv(r[c])).join(','))].join('\n');
+    const gz = gzipSync(Buffer.from(csv, 'utf8'), { level: 9 });
+    writeFileSync(file, gz);
+    return Math.round(gz.length / 1024);
+  };
+  for (const y of years) {
+    if (existsSync(yearSnap(y))) continue; // 凍結済み
+    const rows = db.prepare(`SELECT ${COLS.join(',')} FROM notices_archive
+      WHERE substr(issue_date, 1, 4) = ? ORDER BY issue_date, key`).all(y);
+    console.log(`export: ${y}年 ${rows.length}行 → notices_archive_${y}.csv.gz（${dump(rows, yearSnap(y))}KB・凍結）`);
+  }
+  const cur = db.prepare(`SELECT ${COLS.join(',')} FROM notices_archive
+    WHERE issue_date >= ? OR issue_date IS NULL OR issue_date < '2000' ORDER BY issue_date, key`).all(String(CUR_YEAR));
+  console.log(`export: 現行 ${cur.length}行 → notices_archive.csv.gz（${dump(cur, SNAP)}KB）`);
 } else if (mode === 'import') {
-  if (!existsSync(SNAP)) { console.log('import: スナップショットなし（スキップ）'); process.exit(0); }
-  const csv = gunzipSync(readFileSync(SNAP)).toString('utf8');
+  const files = [];
+  try {
+    const { readdirSync } = await import('node:fs');
+    for (const f of readdirSync(SNAP_DIR)) if (/^notices_archive(_\d{4})?\.csv\.gz$/.test(f)) files.push(join(SNAP_DIR, f));
+  } catch { /* ディレクトリなし */ }
+  if (!files.length) { console.log('import: スナップショットなし（スキップ）'); process.exit(0); }
+  let csv = '';
+  for (const f of files) {
+    const body = gunzipSync(readFileSync(f)).toString('utf8');
+    csv += csv ? '\n' + body.slice(body.indexOf('\n') + 1) : body; // 2つ目以降はヘッダ行を除いて連結
+  }
   const lines = csv.split('\n');
   const parseLine = (line) => {
     const out = []; let cur = '', q = false;
