@@ -41,3 +41,11 @@ export function classify(name) {
   for (const t of TAXONOMY) if (t.re.test(name)) return t.slug;
   return 'other';
 }
+
+// 自治体が電子入札システムの操作研修用に公開している「模擬入札」の練習データ。
+// 実在の落札結果ではないのでサイトに載せない（各fetcherの取り込み前に弾く）。
+// 「卓上型模擬送電線実習装置」のような本物の案件を巻き込まないよう、
+// 「模擬入札」「【模擬】」という明示のマーカーだけを対象にする。
+export function isMockCase(name) {
+  return /模擬入札|【模擬】/.test(name || '');
+}

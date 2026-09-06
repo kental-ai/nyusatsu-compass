@@ -25,7 +25,7 @@
 //   - 詳細には全応札者の法人番号・各回入札額・予定価格まで載る。落札者は赤字（FONT COLOR='#CC0033'）の行
 //   - 金額は税抜き
 import { openDb } from './db.mjs';
-import { classify } from './taxonomy.mjs';
+import { classify, isMockCase } from './taxonomy.mjs';
 
 export const INSTANCES = {
   saitama: { origin: 'https://ebidjk2.ebid2.pref.saitama.lg.jp', base: '/koukai', pref: '埼玉県' },
@@ -256,6 +256,7 @@ for (const k of kikans) {
       if (!det.winner) { dropped++; continue; } // 不調・不落・中止（赤字の落札業者が無い）
       const openDate = det.open_date || row.open_date;
       const name = det.name || row.name;
+      if (isMockCase(name)) { dropped++; continue; } // 操作研修用の模擬入札データは載せない
       n += ins.run(slug, k.name, deptOf(det.kasho || row.kasho, k.name), PREF, name, openDate,
         det.category || supplyNames[sup] || '', det.method || row.method, det.winner, det.corp, det.amount,
         classify(name), fyOf(openDate), nowIso).changes;

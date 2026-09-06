@@ -4,7 +4,7 @@
 // 一覧HTMLに落札者名(+多くは法人番号)+金額が直接載るため、詳細ページ巡回が不要。
 // 直列・500ms間隔。700件制限は開札日範囲の二分割(total<=500)で回避。
 import { openDb } from './db.mjs';
-import { classify } from './taxonomy.mjs';
+import { classify, isMockCase } from './taxonomy.mjs';
 
 // 採用県のインスタンス表（偵察で3手プロトコル実証済みのものだけ追加する）
 // ep-bis共有ホストのテナント表。KikanNO = JIS X 0402の団体コード5桁 + "00"。
@@ -26,6 +26,18 @@ const MIE_KIKANS = { // 三重県本体はこのホストに無く、市町の�
   '2420400': '松阪市', '2420700': '鈴鹿市', '2420800': '名張市', '2421600': '伊賀市', '2444300': '大台町',
 };
 
+// 長野（www.ppi.e-nagano.lg.jp）。KikanNO と団体名は検索条件フレーム（getCondPage）が埋め込む
+// departArray から取得したもの＝一次情報で、推測は含まない（2026-09-07 取得）。
+const NAGANO_KIKANS = {
+  '2000000': '長野県', '2020100': '長野市', '2020200': '松本市', '2020300': '上田市',
+  '2020400': '岡谷市', '2020500': '飯田市', '2020600': '諏訪市', '2020700': '須坂市',
+  '2020880': '小諸市', '2021100': '中野市', '2021200': '大町市', '2021420': '茅野市',
+  '2021500': '塩尻市', '2021700': '佐久市', '2021900': '東御市', '2022000': '安曇野市',
+  '2032100': '軽井沢町', '2032300': '御代田町', '2036100': '下諏訪町', '2036200': '富士見町',
+  '2036300': '原村', '2038400': '飯島町', '2038800': '宮田村', '2040200': '松川町',
+  '2040300': '高森町',
+};
+
 const EPBIS = 'https://www.ep-bis.supercals.jp/ebidPPIPublish/EjPPIj'; // 富士通ASP共同ホスト（マルチテナント）
 
 export const INSTANCES = {
@@ -42,6 +54,13 @@ export const INSTANCES = {
   // 愛媛: 2026-08-23時点で保留。8列型だが一部の行で案件名セルが分割され列がずれる（原因未特定）。
   //       2026-08-24: ヘッダー列数ガードで検証中。 
   ehime: { base: 'https://www.ebid-ppi.pref.ehime.jp/ebidPPIPublish/EjPPIj', pref: '愛媛県', caseNoOrg: true },
+  // 長野: 開札日の絞り込みが BidStDate/BidEnDate ではなく Kaisatsu*Date（2026-09-07に特定）。
+  // 一覧の見出しが部局名から始まり団体名を含まないため、KikanNO ごとに団体名を固定して回す。
+  // 落札者セルの先頭に業者番号（10桁）が付くので winnerNo で落とす。
+  nagano: {
+    base: 'https://www.ppi.e-nagano.lg.jp/ebidPPIPublish/EjPPIj', pref: '長野県',
+    kikans: NAGANO_KIKANS, dateParam: 'Kaisatsu', winnerNo: true,
+  },
 };
 
 // 愛媛は一覧の見出しに団体名が出ず部局名から始まるため、案件名の先頭にある
@@ -138,7 +157,9 @@ function parseList(html, orgFixed = null) {
     const wcell = cells[m.winner] || '';
     const corpNo = (wcell.match(/法人番号\s*(\d{13})/) || [])[1] || '';
     // 栃木等は落札者名が固定長26字に全角空白でパディングされ、末尾に表示用の「…」が付く（実名は完全）
-    const winner = wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').replace(/[\s　]*…+\s*$/, '').trim();
+    let winner = wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').replace(/[\s　]*…+\s*$/, '').trim();
+    // 長野は落札者名の前に業者番号（10桁）が付く。法人番号ではないので捨てる
+    if (INST.winnerNo) winner = winner.replace(/^\d{6,}[\s　]+/, '').trim();
     const amount = Number(((cells[m.amount] || '').match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0);
     if (!winner && !amount) continue; // 入札中止・結果未確定の行
     // 見出しの先頭語が団体名でない（部局名から始まる=単一機関スコープ）なら県名を機関名にする
@@ -149,6 +170,7 @@ function parseList(html, orgFixed = null) {
       const cm = name.match(/^(\d{5})\d{15,}\s*/);
       if (cm) { org = EHIME_JIS[Number(cm[1])] || org; name = name.slice(cm[0].length); }
     }
+    if (isMockCase(name)) continue; // 操作研修用の模擬入札データは載せない
     rows.push({
       org, dept: currentOrg,
       open_date: waDate(cells[m.date]), name,
@@ -159,11 +181,15 @@ function parseList(html, orgFixed = null) {
   return { total, over, rows, skipped };
 }
 
+const DP = INST.dateParam || 'Bid';
+
 async function search(nendo, kikan, orgFixed, extra = {}) {
   const { text } = await req({
     ejParameterID: 'EjPRJ01', ejProcessName: 'findList',
     Nendo: String(nendo), KikanNO: kikan, BukyokuNO: '', ChoutatsuCD: '', KoujiSyubetu: '',
-    kkselect: 'AND', mojisel1: '', mojisel2: '', BidStDate: extra.from || '', BidEnDate: extra.to || '',
+    kkselect: 'AND', mojisel1: '', mojisel2: '',
+    // 開札日の絞り込みフィールド名はインスタンスによって違う（既定=BidStDate/BidEnDate / 長野=Kaisatsu*Date）
+    [`${DP}StDate`]: extra.from || '', [`${DP}EnDate`]: extra.to || '',
     ejDisplaySort: '050045', ejMaxDisplayRowCount: '500', getStpos: '0',
     AllhitSize: '', ejShousaiDispFlag: '', chiikisentaku: '', chiiki_dataList: '',
   });

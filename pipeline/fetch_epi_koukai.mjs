@@ -32,7 +32,7 @@
 // 表示種別 A094: 030=入札・見積結果 / 040=契約結果（随意契約等）。
 // 040 は岩手県・大津市の全年度で0件だったため既定は 030 のみ（必要なら --kind=030,040）。
 import { openDb } from './db.mjs';
-import { classify } from './taxonomy.mjs';
+import { classify, isMockCase } from './taxonomy.mjs';
 
 const ORIGIN = 'https://www.epi-cloud.fwd.ne.jp';
 const BASE = '/koukai';
@@ -260,7 +260,7 @@ for (const hex4 of KIKANS) {
             // 個々の落札者が分からない行は載せない
             if (/詳細参照/.test(row.winner)) { dropped++; continue; }
             // 自治体が公開している模擬入札（練習用）データを除く
-            if (/^テスト/.test(row.winner) || /模擬入札/.test(row.name)) { dropped++; continue; }
+            if (/^テスト/.test(row.winner) || isMockCase(row.name)) { dropped++; continue; }
             n += ins.run(slug, ORG, deptOf(row.kasho, ORG), PREF, row.name, row.open_date,
               supplyName[sup] || '', row.method, row.winner, '', row.amount,
               classify(row.name), fyOf(row.open_date), nowIso).changes;
