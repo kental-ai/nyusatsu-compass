@@ -22,6 +22,10 @@ txt _dmarc v=DMARC1; p=none; rua=mailto:info@nyusatsu-compass.com
 - 秀丸メールの587はSTARTTLS指定を「SMTP over SSL＋STARTTLSを使用」の2チェックで行う
 - 開通確認済み: spf=pass / dmarc=pass（2026-09-06 17:25 JST受信ヘッダ）
 
+## DKIM（2026-09-06 完了）
+- コンパネ「DKIMの設定・鍵確認」でドメインにチェック→有効化 → 公開鍵をDNSに追加:
+  `txt default._domainkey v=DKIM1; k=rsa; p=MIIB...`（255文字超はバリュードメイン側で自動分割）
+- 検証済み: **dkim=pass / spf=pass / dmarc=pass** の三点合格（2026-09-06 17:31 JST受信ヘッダ）
+
 ## 残タスク
-- DKIM: コンパネ「DKIMの設定・鍵確認」→ 公開鍵をDNSにTXT追加
 - アスメル導入時: アスメル指定のSPFを `include:` 追記＋アスメル側DKIMがあれば追加 → Gmail宛でPASS再確認
