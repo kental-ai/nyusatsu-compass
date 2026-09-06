@@ -161,10 +161,13 @@ function parseList(html, orgFixed = null) {
     const corpNo = (wcell.match(/法人番号\s*(\d{13})/) || [])[1] || '';
     // 栃木等は落札者名が固定長26字に全角空白でパディングされ、末尾に表示用の「…」が付く（実名は完全）
     let winner = wcell.replace(/法人番号\s*(\d{13}|[－ー-])?/, '').replace(/[\s　]*…+\s*$/, '').trim();
-    // 長野は落札者名の前に業者番号（10桁）が付く。法人番号ではないので捨てる
-    if (INST.winnerNo) winner = winner.replace(/^\d{6,}[\s　]+/, '').trim();
+    // 長野は落札者名の前に業者番号（10桁）が付く。法人番号ではないので捨てる。
+    // 進捗状況が「入札中止」の行は業者番号だけが残って名前が無いので、空になって下の判定で落ちる
+    if (INST.winnerNo) winner = winner.replace(/^\d{6,}[\s　]*/, '').trim();
     const amount = Number(((cells[m.amount] || '').match(/([\d,]+)円/) || [])[1]?.replaceAll(',', '') ?? 0);
     if (!winner && !amount) continue; // 入札中止・結果未確定の行
+    const openDate = waDate(cells[m.date]);
+    if (!openDate) continue; // 元データで開札日が空欄の行（長野に2件。日付が無いと年度も相場も出せない）
     // 見出しの先頭語が団体名でない（部局名から始まる=単一機関スコープ）なら県名を機関名にする
     const head = currentOrg.split(/\s+/)[0] || '';
     let org = orgFixed || (/(?:都|道|府|県|市|町|村|区|組合|広域|企業団|事務組合|機構|公社)$/.test(head) ? head : INST.pref);
@@ -176,7 +179,7 @@ function parseList(html, orgFixed = null) {
     if (isMockCase(name)) continue; // 操作研修用の模擬入札データは載せない
     rows.push({
       org, dept: currentOrg,
-      open_date: waDate(cells[m.date]), name,
+      open_date: openDate, name,
       category: m.category >= 0 ? cells[m.category] : '', method: m.method >= 0 ? cells[m.method] : '',
       winner, corp_no: corpNo, amount,
     });
