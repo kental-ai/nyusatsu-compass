@@ -99,8 +99,11 @@ async function req(body = null, tries = 3) {
       },
       body: body ? new URLSearchParams(body).toString() : undefined,
       redirect: 'manual',
+      // 応答が返ってこないまま握られると永久に止まる（2026-09-07に長野のバックフィルで発生。
+      // ホストは別セッションからは即応答していたのでソケット単位のハング）。必ず期限を切る
+      signal: AbortSignal.timeout(60000),
     });
-  } catch (e) { // 共有ホストは稀に接続タイムアウトを返す。日次実行を落とさないため数回だけ待って再試行
+  } catch (e) { // 接続タイムアウト・応答ハングは稀に起きる。日次実行を落とさないため数回だけ待って再試行
     if (tries <= 1) throw e;
     console.error(`  再試行(残${tries - 1}): ${e.cause?.code || e.message}`);
     await sleep(5000);
