@@ -57,6 +57,9 @@ jobs:
           for S in aomori iwate miyagi yamagata fukushima shiga wakayama tottori yamaguchi saga nagasaki niigata_epi mie_epi kyoto_epi fukuoka_epi miyazaki_epi okinawa_epi; do
             node pipeline/fetch_epi_koukai.mjs $S --nendo=$FY --max=200 || echo "::warning::$S の取得に失敗（継続）"
           done
+          # 群馬（G-CALS）も落札者・金額が詳細ページにしかなく1件1リクエスト。
+          # 一覧は古い順なのでフェッチャがページを逆順に回る＝新着から埋まる。既知行は詳細を取らずに飛ばす
+          node pipeline/fetch_gcals.mjs gunma --nendo=$FY --percap=25 --max=900 || echo "::warning::gunma の取得に失敗（継続）"
           node pipeline/snapshot_local.mjs export
           # KKJ公告のアーカイブ蓄積（直近7日の新着を取り込み、掲載期間が終わって消える前に保存する）
           node pipeline/archive_notices.mjs import
