@@ -1828,6 +1828,35 @@ ${kunSays(`県や市町村が毎年出している契約を<b>${LCONTRACTS.size.
 
   // 自治体オンリー企業ページ
   const usedCompanyTitles = new Set();
+  // 法人番号 → 関与した継続契約（現保持者か・奪取したか・失った契約か）
+  // 名称の正規化で別工区が束ねられている契約（金額が3倍以上ばらつく）は、奪取・失注の判定から除く
+  const corpContracts = new Map();
+  for (const [cid, c] of LCONTRACTS) {
+    const amts = c.arr.map((x) => x.amount).filter((x) => x > 0);
+    const risky = amts.length >= 2 && Math.max(...amts) / Math.min(...amts) >= 3;
+    const seen = new Set();
+    for (let i = 0; i < c.arr.length; i++) {
+      const cn = c.arr[i].corporate_no;
+      if (!cn || seen.has(cn)) continue;
+      seen.add(cn);
+      const took = !risky && c.arr[i + 1] && c.arr[i + 1].corporate_no && c.arr[i + 1].corporate_no !== cn;
+      const lost = !risky && i > 0 && c.arr[i - 1].corporate_no && c.arr[i - 1].corporate_no !== cn;
+      (corpContracts.get(cn) ?? corpContracts.set(cn, []).get(cn)).push({
+        id: cid, c, isCurrent: i === 0, took, lost, at: c.arr[i].open_date, amount: c.arr[i].amount,
+        successor: lost ? c.arr[i - 1].winner_name : null,
+      });
+    }
+  }
+  // セグメント（県×業種）内の企業ランキング。順位と「同じ土俵の企業」に使う
+  const segCorpRank = new Map();
+  for (const [k, arr] of localByPrefCat) {
+    const m = new Map();
+    for (const a of arr) if (/^\d{13}$/.test(a.corporate_no || '')) {
+      const o = m.get(a.corporate_no) ?? { n: 0, sum: 0, name: a.winner_name };
+      o.n++; o.sum += a.amount || 0; m.set(a.corporate_no, o);
+    }
+    segCorpRank.set(k, [...m.entries()].sort((x, y) => y[1].n - x[1].n));
+  }
   for (const no of localCompanyPages) {
     const list = [...byCorpLocal.get(no)].sort((x, y) => ((x.open_date || '') < (y.open_date || '') ? 1 : -1));
     const name = companyName.get(no) || list[0].winner_name || no;
@@ -1840,10 +1869,69 @@ ${kunSays(`県や市町村が毎年出している契約を<b>${LCONTRACTS.size.
     const topOrg = [...orgAgg.entries()].sort((a, b) => b[1] - a[1])[0];
     const topCat = [...catAgg.entries()].sort((a, b) => b[1] - a[1])[0];
     const years = [...new Set(list.map((a) => (a.open_date || '').slice(0, 4)))].filter(Boolean).sort();
+    // ---- 分析（条件を満たす文だけが出る。実在企業のため評価的な断定はせず記述に徹する）----
+    const pref0 = list[0]?.pref || '';
+    const catKey = topCat ? pref0 + '|' + topCat[0] : '';
+    const bench2 = benchByCat.get(catKey) || {};
+    const rank = catKey ? (segCorpRank.get(catKey) || []).findIndex(([cn]) => cn === no) + 1 : 0;
+    const rankTotal = catKey ? (segCorpRank.get(catKey) || []).length : 0;
+    const amts2 = list.map((a) => a.amount).filter((x) => x > 0).sort((a, b) => a - b);
+    const myRates = list.map((a) => rateOf(a)).filter((x) => x != null);
+    const myRate = myRates.length >= 3 ? Math.round(myRates.reduce((s, x) => s + x, 0) / myRates.length * 10) / 10 : null;
+    const myBidders = list.map((a) => a.bidders).filter((x) => x > 0);
+    const cps = [];
+    cps.push(`${esc(name)}（法人番号${no}）は、当サイトが収録している自治体の入札結果のうち<b>${list.length.toLocaleString()}件</b>で落札者として記録されています${years.length >= 2 ? `。確認できる期間は${years[0]}年から${years[years.length - 1]}年までです` : years.length ? `（${years[0]}年）` : ''}。`);
+    if (orgAgg.size === 1) cps.push(`落札はすべて<b>${esc(topOrg[0])}</b>の案件です。地元の発注機関に絞って参加しているか、当サイトの収録範囲がその機関に限られている可能性があります。`);
+    else if (topOrg && topOrg[1] / list.length >= 0.7) cps.push(`落札の${Math.round(topOrg[1] / list.length * 100)}%が<b>${esc(topOrg[0])}</b>の案件で、特定の発注機関との取引が中心です。ほかに${orgAgg.size - 1}機関で落札実績があります。`);
+    else if (orgAgg.size >= 3) cps.push(`<b>${orgAgg.size}機関</b>にまたがって落札しており、複数の自治体の入札に参加していることがうかがえます。`);
+    if (catAgg.size >= 2) cps.push(`業務分野は${[...catAgg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([s, n]) => `${LABEL[s]}（${n}件）`).join('、')}${catAgg.size > 3 ? `ほか${catAgg.size - 3}分野` : ''}に分かれています。`);
+    if (amts2.length >= 3) {
+      const med2 = amts2[Math.floor(amts2.length / 2)];
+      cps.push(`落札額は${yen(amts2[0])}から${yen(amts2[amts2.length - 1])}まで、中央値は${yen(med2)}です。${bench2.med > 0 ? `${pref0}の${LABEL[topCat[0]] || ''}分野全体の中央値（${yen(bench2.med)}）と比べると、${med2 >= bench2.med * 1.5 ? '規模の大きい案件を中心に受注しています' : med2 <= bench2.med * 0.67 ? '比較的小規模な案件が中心です' : 'ほぼ同じ規模帯の案件を受注しています'}。` : ''}`);
+    }
+    // 順位は「特筆できるとき」だけ書く（上位10%または30位以内）。中位を細かい順位で書いても読み手の役に立たない
+    if (rank && rankTotal >= 30 && (rank <= 30 || rank <= Math.ceil(rankTotal * 0.1))) {
+      cps.push(`${pref0}の${LABEL[topCat[0]] || ''}分野で落札実績のある${rankTotal.toLocaleString()}社の中では、落札件数が<b>第${rank}位</b>（上位${Math.max(1, Math.round(rank / rankTotal * 100))}%）にあたります。`);
+    }
+    if (myRate != null) {
+      cps.push(`予定価格が公表された${myRates.length}件について落札率（予定価格に対する落札額）を平均すると<b>${myRate}%</b>です。${bench2.rate ? `同分野の平均は${bench2.rate}%で、${Math.abs(myRate - bench2.rate) < 1.5 ? '分野の平均的な水準で落札しています' : myRate < bench2.rate ? `平均より${Math.round((bench2.rate - myRate) * 10) / 10}ポイント低い水準です` : `平均より${Math.round((myRate - bench2.rate) * 10) / 10}ポイント高い水準です`}。` : ''}`);
+    }
+    if (myBidders.length >= 3) {
+      const avgB = Math.round(myBidders.reduce((s, x) => s + x, 0) / myBidders.length * 10) / 10;
+      cps.push(`応札社数が公表された案件では平均${avgB}社との競争を経ています${bench2.bid ? `（同分野の平均は${bench2.bid}社）` : ''}。`);
+    }
+    const analysis2 = `<h2>落札の傾向</h2>${cps.map((x) => `<p>${x}</p>`).join(String.fromCharCode(10))}`;
+
+    // ---- 継続契約の保有・奪取・失注 ----
+    const cc = (corpContracts.get(no) || []);
+    const holding = cc.filter((x) => x.isCurrent);
+    const tookList = cc.filter((x) => x.took && x.isCurrent);
+    const lostList = cc.filter((x) => x.lost);
+    const contractsSec = cc.length ? `<h2>関わっている継続契約</h2>
+<p>毎年（または複数年にわたり）繰り返し発注されている契約のうち、${esc(name)}が落札した実績のあるものです。${holding.length ? `<b>${holding.length}件で現在の落札者</b>となっています。` : '現時点で最新の落札者となっている契約は確認できません。'}継続契約は次回の公告時期が読みやすく、競合他社にとっては狙い先、当事者にとっては防衛対象になります。</p>
+<ul>${cc.slice(0, 12).map((x) => `<li><a href="/contract/local/${x.id}/">${esc(x.c.name)}</a>（${esc(x.c.org)}・${x.isCurrent ? '現落札者' : `${(x.at || '').slice(0, 4)}年に落札`}${x.took ? '・前回から奪取' : ''}）</li>`).join('')}</ul>
+${cc.length > 12 ? `<p class="meta">ほか${cc.length - 12}件。</p>` : ''}
+${tookList.length ? `<p><b>前任者から取り替えた契約が${tookList.length}件</b>あります。継続契約でも落札者は入れ替わりうることを示す実例です（当サイトのデータでは、年をまたぐ継続契約の33.1%で落札者が交代しています）。</p>` : ''}
+${lostList.length ? `<p>一方、過去に落札していた契約のうち<b>${lostList.length}件</b>では、その後に別の事業者が落札しています。${lostList.slice(0, 3).map((x) => `「${esc(x.c.name)}」（${esc(x.c.org)}）`).join('、')}などです。</p>` : ''}` : '';
+
+    // ---- 同じ土俵の企業 ----
+    const rivals = catKey ? (segCorpRank.get(catKey) || []).filter(([cn]) => cn !== no && companyHref(cn)).slice(0, 8) : [];
+    const rivalsSec = rivals.length ? `<h2>同じ土俵の企業（${esc(pref0)}×${LABEL[topCat[0]] || ''}）</h2>
+<p>同じ地域・同じ業務分野で落札実績のある事業者です。入札で顔を合わせる可能性のある相手を把握しておくと、応札社数の見立てや値付けの判断に使えます。</p>
+<ul>${rivals.map(([cn, v]) => `<li>${companyLink(cn, esc(companyName.get(cn) || v.name))}（${v.n.toLocaleString()}件）</li>`).join('')}</ul>` : '';
+
     let title = `${name}の入札結果・落札実績【自治体${list.length.toLocaleString()}件】｜${SITE}`;
     if (usedCompanyTitles.has(title)) title = `${name}の入札結果・落札実績【自治体${list.length.toLocaleString()}件】（法人番号${no}）｜${SITE}`;
     usedCompanyTitles.add(title);
-    const faqs = [[`${name}の法人番号は?`, `${name}の法人番号は${no}です。当サイトではこの法人番号をキーに、自治体入札の落札実績${list.length.toLocaleString()}件を集計しています。`]];
+    const faqs = [
+      [`${name}の法人番号は?`, `${name}の法人番号は${no}です。当サイトではこの法人番号をキーに、自治体入札の落札実績${list.length.toLocaleString()}件を集計しています。`],
+      [`${name}はどこの入札で落札していますか?`,
+        `${topOrg ? `${topOrg[0]}が最も多く${topOrg[1]}件です` : '発注機関別の実績は本ページの表をご覧ください'}${orgAgg.size >= 2 ? `。ほかに${orgAgg.size - 1}機関での落札実績があります` : ''}。${years.length >= 2 ? `確認できる期間は${years[0]}年から${years[years.length - 1]}年です。` : ''}`],
+      [`${name}が落札している業務は?`,
+        `${topCat ? `「${LABEL[topCat[0]]}」分野が中心で${topCat[1]}件です` : '業務分野は集計中です'}${catAgg.size >= 2 ? `。${catAgg.size}分野にまたがって落札しています` : ''}。当サイトは案件名から業務分野を自動分類しています。`],
+      ...(myRate != null ? [[`${name}の落札率はどのくらいですか?`,
+        `予定価格が公表された${myRates.length}件の平均落札率は${myRate}%です${bench2.rate ? `（同じ地域・分野の平均は${bench2.rate}%）` : ''}。落札率は予定価格に対する落札額の割合です。`]] : []),
+    ];
     page(`/company/${no}/`, {
       title,
       desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${no}）。${topOrg ? `${topOrg[0]}を中心に` : ''}${topCat ? `「${LABEL[topCat[0]]}」分野で` : ''}${years.length ? `${years[0]}〜${years[years.length - 1]}年に` : ''}落札実績があります。落札金額・発注機関をデータで公開。`,
@@ -1854,7 +1942,8 @@ ${kunSays(`県や市町村が毎年出している契約を<b>${LCONTRACTS.size.
       body: `<h1>${esc(name)}の入札結果・落札実績</h1>
 <p class="meta">法人番号 ${no}。県・市町村の入札結果公表データに基づく（国の機関での落札実績は未収録または2件未満）。</p>
 ${kunSays(`${esc(name)}は${topOrg ? `<b>${esc(topOrg[0])}</b>を中心に` : ''}自治体入札で<b>${list.length.toLocaleString()}件</b>の落札実績があるよ${topCat ? `。主な分野は<b>${LABEL[topCat[0]]}</b>だよ` : ''}!`)}
-${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', total > 0 ? yen(total) : '—'], ['直近の落札', list[0]?.open_date || '—']])}
+${statBoxes([['落札件数', list.length.toLocaleString() + '件'], ['落札総額', total > 0 ? yen(total) : '—'], ['直近の落札', list[0]?.open_date || '—'], ...(myRate != null ? [['平均落札率', myRate + '%']] : []), ...(holding.length ? [['継続契約の保持', holding.length + '件']] : [])])}
+${analysis2}
 <h2>発注機関別の実績</h2>
 <div class="wrap"><table><tr><th>発注機関</th><th>件数</th></tr>
 ${[...orgAgg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([o, n]) => `<tr><td>${esc(o)}</td><td class="num">${n}</td></tr>`).join(String.fromCharCode(10))}</table></div>
@@ -1862,9 +1951,12 @@ ${[...orgAgg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([o, n]) =>
 <div class="wrap"><table><tr><th>開札日</th><th>案件名</th><th>発注機関</th><th>落札額</th></tr>
 ${list.slice(0, 30).map((a, i) => `<tr><td>${a.open_date || ''}</td><td>${esc(a.name)}</td><td>${esc(a.org)}</td><td class="num">${i < 3 ? (a.amount > 0 ? yen(a.amount) : '—') : gM(a.amount > 0 ? yen(a.amount) : '—')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
 <p class="tbl-note unlock-hide">4件目以降の落札額は<b>無料会員</b>（メール登録）で表示されます。 ${unlockBtn(`/company/${no}/`)}</p>
+${contractsSec}
+${rivalsSec}
 <h2>よくある質問</h2>
 ${faqs.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join(String.fromCharCode(10))}
-<p>${PREF_SLUGS[list[0]?.pref] ? `<a href="/local/${PREF_SLUGS[list[0].pref]}/">→ ${esc(list[0].pref)}の入札情報</a> ／ ` : ''}<a href="/company/">→ 落札企業データベース</a></p>`,
+<p class="meta">本ページは各自治体が公表した入札結果を法人番号で名寄せして集計したものです。当サイトが収録している範囲での実績であり、${esc(name)}の受注全体を示すものではありません。訂正のご依頼は<a href="/policy/">掲載ポリシー</a>の窓口へお願いします。</p>
+<p>${PREF_SLUGS[list[0]?.pref] ? `<a href="/local/${PREF_SLUGS[list[0].pref]}/">→ ${esc(list[0].pref)}の入札情報</a> ／ ` : ''}${catKey && LABEL[topCat[0]] ? `<a href="/price/${topCat[0]}/">→ ${LABEL[topCat[0]]}の落札相場</a> ／ ` : ''}<a href="/company/">→ 落札企業データベース</a></p>`,
     });
   }
   console.log(`自治体二次加工: 継続契約${lcCount.toLocaleString()}件 / 自治体オンリー企業${localCompanyPages.size.toLocaleString()}社`);
