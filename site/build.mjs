@@ -1660,6 +1660,7 @@ const SHIKAKU_SYSTEMS = { // 当サイトが実際にデータ取得している
   '愛媛県': ['愛媛県の入札情報サービス', 'https://www.ebid-ppi.pref.ehime.jp/'],
   '秋田県': ['秋田県電子入札システム', 'https://cals05.pref.akita.lg.jp/'],
   '神奈川県': ['かながわ電子入札共同システム', 'https://ebid-joho.e-kanagawa.lg.jp/'],
+  '岡山県': ['岡山県電子入札共同利用システム', 'https://www.e-okayama.t-elbs.jp/'],
 };
 const shikakuPrefs = [];
 for (const prefName of PREFS) {
