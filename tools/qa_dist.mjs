@@ -9,28 +9,39 @@ import { fileURLToPath } from 'node:url';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'site', 'dist');
 const files = [];
+const ASSETS = [];
 (function walk(d) {
   for (const e of readdirSync(d, { withFileTypes: true })) {
     const p = join(d, e.name);
     if (e.isDirectory()) walk(p);
     else if (e.name.endsWith('.html') && !/^google[a-f0-9]+\.html$/.test(e.name)) files.push(p);
+    else ASSETS.push(p);
   }
 })(DIST);
 
 const issues = new Map();
-const add = (kind, detail) => { (issues.get(kind) ?? issues.set(kind, []).get(kind)).push(detail); };
+const counts = new Map();
+const add = (kind, detail) => {
+  counts.set(kind, (counts.get(kind) || 0) + 1);
+  const l = issues.get(kind) ?? issues.set(kind, []).get(kind);
+  if (l.length < 200) l.push(detail); // 詳細は種別ごと200件まで（異常時のメモリ爆発を防ぐ）
+};
 const titles = new Map();
 const stripJs = (h) => h.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '');
-const linkOk = new Map();
+// 実在パスの集合を一度だけ作る（7万ページでのfs参照とキャッシュ肥大を避ける。メモリと速度の両方に効く）
+const VALID = new Set(['/']);
+for (const f of files) {
+  const rel = '/' + f.slice(DIST.length + 1).split(String.fromCharCode(92)).join('/');
+  VALID.add(rel);
+  if (rel.endsWith('/index.html')) VALID.add(rel.slice(0, -'index.html'.length));
+}
+for (const f of ASSETS) VALID.add('/' + f.slice(DIST.length + 1).split(String.fromCharCode(92)).join('/'));
 const checkLink = (href) => {
-  if (linkOk.has(href)) return linkOk.get(href);
   let path = href.split('#')[0].split('?')[0];
-  if (!path || path === '/') { linkOk.set(href, true); return true; }
+  if (!path || path === '/') return true;
   try { path = decodeURIComponent(path); } catch { /* 不正エンコードはそのまま */ }
-  const fs1 = join(DIST, path);
-  const ok = existsSync(fs1) && (path.includes('.') ? true : existsSync(join(fs1, 'index.html')));
-  linkOk.set(href, ok);
-  return ok;
+  if (VALID.has(path)) return true;
+  return VALID.has(path.endsWith('/') ? path : path + '/');
 };
 
 let checked = 0;
@@ -60,11 +71,12 @@ for (const f of files) {
 }
 
 let total = 0;
-for (const [kind, list] of [...issues.entries()].sort((a, b) => b[1].length - a[1].length)) {
-  total += list.length;
-  console.log(`NG ${kind}: ${list.length}件`);
+for (const [kind, list] of [...issues.entries()].sort((a, b) => (counts.get(b[0]) || 0) - (counts.get(a[0]) || 0))) {
+  const n = counts.get(kind) || list.length;
+  total += n;
+  console.log(`NG ${kind}: ${n}件`);
   for (const d of list.slice(0, 8)) console.log(`   ${d}`);
-  if (list.length > 8) console.log(`   …ほか${list.length - 8}件`);
+  if (n > 8) console.log(`   …ほか${n - 8}件`);
 }
 console.log(`\n検品: ${checked}ページ / 問題${total}件`);
 if (total && process.argv.includes('--fail')) process.exit(1);

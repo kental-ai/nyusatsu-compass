@@ -1,7 +1,7 @@
 // 入札コンパス 静的サイト生成（外部依存ゼロ）
 // 使い方: node site/build.mjs  → site/dist に出力
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, writeFileSync, rmSync, cpSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -521,6 +521,25 @@ function groupTable(list, keyFn, labelFn, linkFn = null, limit = 10) {
 }
 
 // ---------- 生成 ----------
+// 二重ビルドの防止: 同じワークツリーで別セッション（定期ルーティン等）が同時にビルドすると
+// dist を互いに消し合って壊れる。ロックファイルで排他する（古いロックは自動で無効化）。
+const LOCK = join(ROOT, 'site', '.build.lock');
+{
+  const now = Date.now();
+  if (existsSync(LOCK)) {
+    const age = now - Number(readFileSync(LOCK, 'utf8').split('|')[0] || 0);
+    if (age < 20 * 60 * 1000) {
+      console.error(`別のビルドが実行中です（${Math.round(age / 1000)}秒前に開始）。二重実行を避けるため中断します。`);
+      console.error(`意図的に強制する場合は site/.build.lock を削除してください。`);
+      process.exit(2);
+    }
+    console.error('古いロックを検出したため無視します（前回のビルドが異常終了した可能性）。');
+  }
+  writeFileSync(LOCK, `${now}|${process.pid}`);
+  const release = () => { try { rmSync(LOCK, { force: true }); } catch { /* ignore */ } };
+  process.on('exit', release);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { release(); process.exit(1); });
+}
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
 if (existsSync(join(ROOT, 'site', 'static'))) cpSync(join(ROOT, 'site', 'static'), join(DIST, 'assets'), { recursive: true });
@@ -1662,9 +1681,11 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
     const ratioAll = amounts.length >= 2 ? Math.max(...amounts) / Math.min(...amounts) : 1;
     const mixedRisk = ratioAll >= 3;
     const ps = [];
-    ps.push(`「${esc(c.name)}」は、${esc(c.org)}が${yrs.length >= 2 ? `${yrs[0]}年から${yrs[yrs.length - 1]}年まで` : `${yrs[0] || ''}年に`}${arr.length}回発注している契約です。${yrs.length >= 4 ? '複数年にわたって定期的に出ており、来年度以降も継続する可能性が高いとみられます。' : yrs.length === 2 ? '履歴は2年分のため、継続的な発注かどうかは今後の公告で確かめる必要があります。' : ''}${c.slug && LABEL[c.slug] ? `業務分野は「${LABEL[c.slug]}」に分類されます。` : ''}`);
+    ps.push(`「${esc(c.name)}」${mixedRisk ? 'という名称では' : 'は'}、${esc(c.org)}が${yrs.length >= 2 ? `${yrs[0]}年から${yrs[yrs.length - 1]}年まで` : `${yrs[0] || ''}年に`}${arr.length}回${mixedRisk ? '入札を実施しています。' : '発注している契約です。'}${mixedRisk ? '' : yrs.length >= 4 ? '複数年にわたって定期的に出ており、来年度以降も継続する可能性が高いとみられます。' : yrs.length === 2 ? '履歴は2年分のため、継続的な発注かどうかは今後の公告で確かめる必要があります。' : ''}${c.slug && LABEL[c.slug] ? `業務分野は「${LABEL[c.slug]}」に分類されます。` : ''}`);
     if (mixedRisk) ps.push(`<b>読むときの注意</b>: この契約の落札額は最大と最小で${Math.round(ratioAll)}倍以上の開きがあります。当サイトは案件名から年度表記や数字を取り除いて同じ契約をまとめているため、「その1・その2」や工区違いなど、<b>別々の案件が同じ名前として束ねられている可能性</b>があります。金額を比較する際は、開札日と発注機関が同じでも中身が同一の業務とは限らない点にご留意ください。`);
-    if (flips === 0 && arr.length >= 3) {
+    if (mixedRisk) {
+      ps.push(`このページに集めた${arr.length}件では、落札者は${[...new Set(arr.map((x) => x.winner_name).filter(Boolean))].length}社にわたっています。ただし上記のとおり別案件が混在している可能性があるため、「落札者が交代した」と読むことはできません。個々の案件は開札日で見分けてください。`);
+    } else if (flips === 0 && arr.length >= 3) {
       ps.push(`これまで<b>${esc(last.winner_name || '—')}が${arr.length}回続けて落札</b>しており、実績や地域要件で優位に立っている可能性があります。新規で挑む場合は、価格だけでなく参加要件を満たせるかの確認が先になります。`);
     } else if (flips >= 2) {
       ps.push(`落札者は<b>これまで${flips}回入れ替わって</b>います。特定の業者に固定されておらず、条件が合えば新規参入の余地がある契約といえます。`);
@@ -1677,7 +1698,7 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
     else if (trend) ps.push(`落札額は年による増減はあるものの、大きな水準変化はありません。`);
     if (bench.med > 0 && last.amount > 0) {
       const r = last.amount / bench.med;
-      if (r >= 1.5 || r <= 0.67) ps.push(`${esc(c.pref)}の${LABEL[c.slug] || ''}分野の落札額の中央値（${yen(bench.med)}・${bench.n.toLocaleString()}件から算出）と比べると、この契約は<b>${pctTxt(r)}</b>規模にあたります。`);
+      if (r >= 1.5 || r <= 0.67) ps.push(`${esc(c.pref)}の${LABEL[c.slug] || ''}分野の落札額の中央値（${yen(bench.med)}・${bench.n.toLocaleString()}件から算出）と比べると、${mixedRisk ? '直近の案件は' : 'この契約は'}<b>${pctTxt(r)}</b>規模にあたります。`);
       else ps.push(`${esc(c.pref)}の${LABEL[c.slug] || ''}分野では中央値${yen(bench.med)}（${bench.n.toLocaleString()}件）で、この契約はその標準的な規模帯にあります。`);
     }
     if (orgB.n >= 20) ps.push(`発注元の${esc(c.org)}は当サイト収録分で<b>${orgB.n.toLocaleString()}件</b>の落札実績があり、${orgB.n >= 500 ? '継続的に多くの案件を出している発注機関です' : '定期的に発注のある機関です'}。`);
@@ -1686,7 +1707,9 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
     // ---- 値付けの目安 ----
     const pp = [];
     pp.push(`直近の落札額は<b>${last.amount > 0 ? yen(last.amount) : '非公表'}</b>${diffTxt && !mixedRisk ? `（${diffTxt}）` : ''}です。${mixedRisk ? '（過去の落札額との開きが大きいため、前回比は参考値として扱ってください）' : ''}`);
-    if (amounts.length >= 3) pp.push(`過去${amounts.length}回の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}で、これがこの契約の素の水準といえます。`);
+    if (amounts.length >= 3) pp.push(mixedRisk
+      ? `このページに集めた${amounts.length}件の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}ですが、規模の異なる案件が混ざっているため、代表値としては扱えません。`
+      : `過去${amounts.length}回の落札額の中央値は${gM(yen(median(amounts)), '●●●万円')}で、これがこの契約の素の水準といえます。`);
     if (lastRate != null) {
       pp.push(`直近の<b>落札率（予定価格に対する落札額の割合）は${lastRate}%</b>${last.bidders ? `、応札は${last.bidders}社` : ''}でした。`);
       if (bench.rate) {
@@ -1709,11 +1732,11 @@ ${kunSays('企画提案で決まるプロポーザル案件だけを集めたよ
     const bidHist = arr.map((x) => x.bidders).filter((x) => x > 0);
     const competition = (bidHist.length || flips || arr.length >= 3) ? `<h2>競争環境</h2>
 <p>${bidHist.length ? `この契約の応札社数は${bidHist.join('社、')}社と推移しています。${bench.bid ? `${esc(c.pref)}の${LABEL[c.slug] || ''}分野の平均は${bench.bid}社なので、${bidHist[0] >= bench.bid * 1.3 ? '<b>平均より競争が激しい</b>案件です。価格勝負になりやすく、積算に時間をかけるより落札率の水準を合わせにいく方が有効です' : bidHist[0] <= bench.bid * 0.7 ? '<b>平均より応札が少ない</b>案件です。参加要件や地理条件で絞られている可能性があり、条件を満たせるなら比較的取りやすい部類です' : '分野の平均的な競争環境です'}。` : ''}` : `${esc(c.org)}は入札結果に応札社数を公表していないため、この契約に何社が参加したかは分かりません。判断材料になるのは落札者の顔ぶれの変化です。${bench.bid ? `参考までに、${esc(c.pref)}の${LABEL[c.slug] || ''}分野で応札社数が公表されている案件の平均は${bench.bid}社です。` : ''}`}
-${flips >= 2 ? `過去に${flips}回落札者が交代していることからも、複数の業者が継続的に参加している契約と考えられます。` : flips === 1 ? `過去に1回、落札者が交代しています。現職が守り切れなかった実績がある以上、条件次第では入れ替わりうる契約です。` : flips === 0 && arr.length >= 3 ? `落札者が一度も替わっていない点は、参入のハードルが高いことを示唆します。ただし当サイトのデータでは、年をまたぐ継続契約の33.1%で落札者が交代しています。「替わらない」と決めつける前に、今年の公告条件を確認する価値はあります。` : ''}</p>` : '';
+${mixedRisk ? '' : flips >= 2 ? `過去に${flips}回落札者が交代していることからも、複数の業者が継続的に参加している契約と考えられます。` : flips === 1 ? `過去に1回、落札者が交代しています。現職が守り切れなかった実績がある以上、条件次第では入れ替わりうる契約です。` : flips === 0 && arr.length >= 3 ? `落札者が一度も替わっていない点は、参入のハードルが高いことを示唆します。ただし当サイトのデータでは、年をまたぐ継続契約の33.1%で落札者が交代しています。「替わらない」と決めつける前に、今年の公告条件を確認する価値はあります。` : ''}</p>` : '';
 
     // ---- 次回に向けて ----
     const nextTime = topMonth ? `<h2>次回に向けて</h2>
-<p>${monthSolid ? `この契約は例年<b>${topMonth}月頃</b>に開札されています。公告はその1〜2ヶ月前、つまり<b>${((topMonth + 10) % 12) + 1}月頃</b>に出るのが通例です。` : `直近は${+(last.open_date || '').slice(5, 7)}月に開札されていますが、履歴が短いため時期の傾向は参考程度に見てください。`}
+<p>${monthSolid && !mixedRisk ? `この契約は例年<b>${topMonth}月頃</b>に開札されています。公告はその1〜2ヶ月前、つまり<b>${((topMonth + 10) % 12) + 1}月頃</b>に出るのが通例です。` : `直近は${+(last.open_date || '').slice(5, 7)}月に開札されていますが、履歴が短いため時期の傾向は参考程度に見てください。`}
 公告から入札書の提出までは2〜3週間しかないことが多く、そこから仕様書を読み、見積を集め、社内決裁を通すのは容易ではありません。狙うのであれば、公告が出る前の月から参加要件の確認と概算の準備を始めておくのが現実的です。${lastRate != null ? `値付けは、前回の落札率${lastRate}%を出発点に、今年の応札社数の見込みで微調整するのが基本形になります。` : ''}</p>` : '';
 
     // ---- 同じ発注機関の他の継続契約 ----
@@ -1727,9 +1750,11 @@ ${flips >= 2 ? `過去に${flips}回落札者が交代していることから�
       [`「${c.name}」は前回いくらで落札されましたか?`,
         `直近は${last.open_date}に${esc(last.winner_name || '—')}が${last.amount > 0 ? yen(last.amount) : '非公表の金額'}で落札しています${diffTxt ? `（${diffTxt.replace(/<\/?b>/g, '')}）` : ''}。当ページに過去${arr.length}回分の履歴を掲載しています。`],
       [`この契約は毎年発注されますか?`,
-        `${esc(c.org)}はこの契約を${yrs.length >= 2 ? `${yrs[0]}年から${yrs[yrs.length - 1]}年まで` : ''}${arr.length}回発注しています${topMonth && monthSolid ? `。例年${topMonth}月頃の開札です` : ''}。継続的な発注が確認できますが、次回の発注を保証するものではありません。`],
+        mixedRisk
+          ? `この名称では${yrs.length >= 2 ? `${yrs[0]}年から${yrs[yrs.length - 1]}年にかけて` : ''}${arr.length}件の入札結果が確認できます。ただし金額の幅が大きく、工区違いなど別案件が同じ名称で束ねられている可能性があるため、同一契約が毎年出ているとは断定できません。`
+          : `${esc(c.org)}はこの契約を${yrs.length >= 2 ? `${yrs[0]}年から${yrs[yrs.length - 1]}年まで` : ''}${arr.length}回発注しています${topMonth && monthSolid ? `。例年${topMonth}月頃の開札です` : ''}。継続的な発注が確認できますが、次回の発注を保証するものではありません。`],
       [`新規で参入できる余地はありますか?`,
-        `${flips >= 2 ? `この契約では過去に${flips}回落札者が交代しており、参入の余地はある方です。` : flips === 1 ? `過去に1回落札者が交代しています。固定化しきってはいません。` : `これまで落札者の交代は確認できていません。参入のハードルは高めとみられます。`}参加資格や地域要件を満たせるかを、公告時に必ず確認してください。`],
+        `${mixedRisk ? `このページには複数の案件が混在している可能性があるため、交代の有無から参入余地を判断することはできません。個々の案件の落札者と金額を、開札日ごとにご確認ください。` : flips >= 2 ? `この契約では過去に${flips}回落札者が交代しており、参入の余地はある方です。` : flips === 1 ? `過去に1回落札者が交代しています。固定化しきってはいません。` : `これまで落札者の交代は確認できていません。参入のハードルは高めとみられます。`}参加資格や地域要件を満たせるかを、公告時に必ず確認してください。`],
       ...(lastRate != null ? [[`落札率はどのくらいですか?`,
         `直近の落札率は${lastRate}%です${bench.rate ? `（${c.pref}の${LABEL[c.slug] || ''}分野の平均は${bench.rate}%）` : ''}。落札率は予定価格に対する落札額の割合で、値付けの目安になります。`]] : []),
     ];
@@ -1746,8 +1771,10 @@ ${flips >= 2 ? `過去に${flips}回落札者が交代していることから�
       jsonld: [{ '@context': 'https://schema.org', '@type': 'Dataset', name: `${c.name}の落札履歴`, description: `${c.org}の継続契約「${c.name}」の落札結果${arr.length}件`, creator: { '@type': 'Organization', name: SITE } }, faqLd],
       body: `<h1>${esc(c.name)}</h1>
 <p class="meta">発注: ${esc(c.org)}（${esc(c.pref)}）${c.slug && c.slug !== 'other' && LABEL[c.slug] ? ` ／ 業務分野: <a href="/price/${c.slug}/">${LABEL[c.slug]}</a>` : ''}</p>
-${kunSays(`この契約は<b>${c.years}年分・${arr.length}件</b>の履歴があるよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が落札${diffTxt ? `。${diffTxt}したよ` : 'したよ'}!`)}
-${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(rateOf(last) ? [['直近の落札率', rateOf(last) + '%']] : []), ...(last.bidders ? [['直近の応札', last.bidders + '社']] : []), ...(topMonth && monthSolid ? [['例年の時期', `${topMonth}月頃`]] : [])])}
+${kunSays(mixedRisk
+  ? `この名前で<b>${arr.length}件</b>の入札結果を集めたよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が${yen(last.amount)}で落札。金額の幅が大きいから、工区違いの別案件が混ざっているかもしれないよ。下の注意書きも読んでね!`
+  : `この契約は<b>${c.years}年分・${arr.length}件</b>の履歴があるよ。直近は<b>${last.open_date}</b>に${esc(last.winner_name || '—')}が落札${diffTxt ? `。${diffTxt}したよ` : 'したよ'}!`)}
+${statBoxes([['履歴', `${c.years}年分・${arr.length}件`], ['直近の落札', last.open_date], ...(amounts.length ? [['直近の落札額', last.amount > 0 ? yen(last.amount) : '—']] : []), ...(rateOf(last) ? [['直近の落札率', rateOf(last) + '%']] : []), ...(last.bidders ? [['直近の応札', last.bidders + '社']] : []), ...(topMonth && monthSolid && !mixedRisk ? [['例年の時期', `${topMonth}月頃`]] : [])])}
 ${analysis}
 <h2>値付けの目安</h2>
 <p>${pricingProse}</p>
