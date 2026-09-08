@@ -10,6 +10,9 @@ export const DATA_DIR = join(ROOT, 'data');
 export function openDb() {
   mkdirSync(DATA_DIR, { recursive: true });
   const db = new DatabaseSync(join(DATA_DIR, 'compass.db'));
+  // ビルド（site/build.mjs）とバックフィルが同時に走るとロックが競合する。
+  // 既定は即 SQLITE_BUSY で落ちるため、数十分のバックフィルが読み手1つで死ぬ（2026-09-08に実害）。
+  db.exec('PRAGMA busy_timeout = 60000;');
   db.exec(`
     CREATE TABLE IF NOT EXISTS awards (             -- 落札実績（GEPS。P2で自治体も同居）
       case_no       TEXT NOT NULL,                  -- 調達案件番号

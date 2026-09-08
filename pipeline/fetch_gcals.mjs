@@ -158,7 +158,12 @@ function parseDetail(html) {
   for (const tr of rows) {
     const tds = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) => m[1]);
     if (!tds.length) continue;
-    const isWinner = /color:\s*red/i.test(tds[0]) || tds.slice(1).some((t) => /落\s*札/.test(strip(t)));
+    // 落札者は**赤字の行**（表示上の正）。テキストの「落札」で拾うのは金額欄（第1〜3回・随意契約）だけに限る。
+    // 摘要欄には「先順位案件落札のため無効扱い」のように**落札者でない行にも「落札」が出る**ため、
+    // 摘要まで見ると無効行を落札者と誤認する（2026-09-08に実害。群馬県の分割発注案件など11件）。
+    // 併せて無効・失格・辞退の行は落札者になり得ないので明示的に除く。
+    if (/無効|失格|辞退/.test(strip(tds[5] || ''))) continue;
+    const isWinner = /color:\s*red/i.test(tds[0]) || tds.slice(1, 5).some((t) => /落\s*札/.test(strip(t)));
     if (!isWinner) continue;
     const t = strip(tds[0]); // 業者名<br>法人番号（13桁）
     const cn = (han(t).match(/(\d{13})/) || [])[1] || '';
