@@ -43,7 +43,7 @@ const teaseYen = (n) => { // 591万円→5●●万円 / 1,234万円→1,●●�
 const gP = (tease) => `<span class="g g-p" title="ウォッチ会員限定">${tease} <span class="lk">🔒</span></span>`;
 const CTA_LABEL = '無料会員登録して続きを見る';
 // 全サイト唯一の出口。文脈（戻り先・ウォッチ対象）はパラメータで持たせるだけで、ボタンと行き先は常に同じ
-const cta = (path, extra = '') => `<a class="btn" href="/alert/?back=${encodeURIComponent(path || '/')}${extra}">${CTA_LABEL}</a>`;
+const cta = (path, extra = '') => `<a class="btn" rel="nofollow" href="/alert/?back=${encodeURIComponent(path || '/')}${extra}">${CTA_LABEL}</a>`;
 const unlockBtn = (path) => cta(path);
 // 勝てる札の推定レンジ（参考値）: 前回額を中心に前回比トレンドを半分織り込み、-8%〜+4%
 const estimateRange = (arr) => {
@@ -427,7 +427,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <style>${CSS}</style>${jsonld ? `\n<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ''}
 <script defer src="/assets/gate.js"></script>
 </head><body>
-<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" href="/alert/?back=${encodeURIComponent(path)}">${CTA_LABEL}</a></div></header>
+<header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a><a class="hcta" rel="nofollow" href="/alert/?back=${encodeURIComponent(path)}">${CTA_LABEL}</a></div></header>
 <main>${crumbHtml}
 ${body}
 ${path === '/alert/' || path === '/alert/thanks/' ? '' : `<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">歴代の落札金額・前回比・契約の中央値・類似案件検索の全期間が、無料会員で開きます。</b><br>
@@ -2711,7 +2711,10 @@ scat.addEventListener('change',render);spref.addEventListener('change',render);
 `);
 
 // robots / llms / sitemap（1万URLごとに分割）
-writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`);
+// 会員登録CTAは全ページから /alert/?back=... の形でリンクしており、URLがページ数だけ増える（実測94,871通り）。
+// 中身はすべて /alert/ と同一のためGoogleは「代替ページ」として捨てるが、その判定のためにクロールを消費してしまう。
+// 実コンテンツのクロールに予算を回すため、クエリ付きの /alert/ はクロール対象から外す（利用者の動線には影響なし）。
+writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /alert/?\nSitemap: ${ORIGIN}/sitemap.xml\n`);
 // Search Console所有権確認 + IndexNowキー（公開仕様）
 writeFileSync(join(DIST, 'googlea7352c9a5da5cbc1.html'), 'google-site-verification: googlea7352c9a5da5cbc1.html');
 cpSync(join(ROOT, 'site', 'static', 'favicon.ico'), join(DIST, 'favicon.ico')); // ブラウザは /favicon.ico を直接見に来る
