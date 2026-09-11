@@ -1118,6 +1118,7 @@ ${kunSays(`毎年くり返し発注されている契約を<b>${contractCount.to
 <h2>発注機関から探す</h2><ul>${[...contractsByMinistry.entries()].sort((x, y) => y[1].length - x[1].length).map(([mc, l]) => `<li><a href="/contract/${mc.toLowerCase()}/">${esc(MINISTRIES[mc] || mc)}</a>（${l.length.toLocaleString()}契約）</li>`).join('')}</ul>`,
 });
 
+lapLog('契約ハブ完了');
 // 満了レーダーページ（業務別。次回公告が近い継続契約の予測。国内唯一のコンテンツ）
 const MONTHS_JP = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 let radarCount = 0;
@@ -1155,6 +1156,7 @@ ${kunSays('毎年くり返される契約の「次はいつ公告されるか」
   });
 }
 
+lapLog('レーダー完了');
 // 入札ガイド（初心者のペインに答える入口。実データで数値を埋め、道具へ誘導する）
 {
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -1274,6 +1276,15 @@ for (const [no, l] of byCompany) {
   nameCounts.set(nm, (nameCounts.get(nm) || 0) + 1);
 }
 let companyCount = 0;
+// 機関ごとの件数と上位分野（企業ページの「主な取引先」で使う。機関ごとに1回だけ計算する。
+// 以前は企業ごとに上位3機関の全落札（最大8万件）を走査しており、企業ページ全体で7分以上かかっていた）
+const MIN_PROFILE = new Map();
+for (const [mc, all] of byMinistry) {
+  const cats3 = new Map();
+  for (const x of all) if (x.slug && x.slug !== 'other' && LABEL[x.slug]) cats3.set(x.slug, (cats3.get(x.slug) || 0) + 1);
+  MIN_PROFILE.set(mc, { n: all.length, tc3: [...cats3.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3) });
+}
+lapLog('企業ページ（国）開始');
 for (const [corpNo, list] of byCompany) {
   if (list.length < MIN_COMPANY_AWARDS) continue;
   companyCount++;
@@ -1426,12 +1437,9 @@ ${yrRows.map(([y, o], i) => `<tr><td>${y}年</td><td class="num">${o.n.toLocaleS
   const orgSec = topMins.length ? `<h2>主な取引先の発注機関</h2>
 <p>この会社が実際に受注している機関を、規模とあわせて見ていきます。同じ機関で競合したい場合は、そこでの発注の中身と頻度が入り口の情報になります。</p>
 ${topMins.map(([mc, o]) => {
-    const all = byMinistry.get(mc) || [];
+    const mp = MIN_PROFILE.get(mc) || { n: 0, tc3: [] };
     const share = Math.round(o.n / list.length * 100);
-    const cats3 = new Map();
-    for (const x of all) if (x.slug && x.slug !== 'other' && LABEL[x.slug]) cats3.set(x.slug, (cats3.get(x.slug) || 0) + 1);
-    const tc3 = [...cats3.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-    return `<p><b>${organLink(mc, esc(MINISTRIES[mc]))}</b> — ${o.n.toLocaleString()}件（${esc(name)}の落札の${share}%）、総額${gM(yen(o.sum))}。${MINISTRIES[mc]}は当サイト収録で${all.length.toLocaleString()}件の落札実績があり、${tc3.length ? `発注が多いのは${tc3.map(([s, n]) => `${LABEL[s]}（${n.toLocaleString()}件）`).join('、')}です。` : ''}</p>`;
+    return `<p><b>${organLink(mc, esc(MINISTRIES[mc]))}</b> — ${o.n.toLocaleString()}件（${esc(name)}の落札の${share}%）、総額${gM(yen(o.sum))}。${MINISTRIES[mc]}は当サイト収録で${mp.n.toLocaleString()}件の落札実績があり、${mp.tc3.length ? `発注が多いのは${mp.tc3.map(([s, n]) => `${LABEL[s]}（${n.toLocaleString()}件）`).join('、')}です。` : ''}</p>`;
   }).join(String.fromCharCode(10))}` : '';
 
   // ---- G 落札額の分布 ----
