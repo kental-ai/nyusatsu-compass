@@ -35,7 +35,7 @@ const textOf = (h) => {
 const sentsOf = (s) => s.split('。').map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => x.length >= 8);
 const secOf = (p) => {
   const s = p.replace(/^\//, '').split('/');
-  if (s[0] === 'local') return s.length <= 2 ? 'local/県' : 'local/市区町村';
+  if (s[0] === 'local') return s.length <= 3 ? 'local/県' : 'local/市区町村'; // /local/kyoto/index.html → 県
   if (s[0] === 'contract') return s[1] === 'local' ? 'contract/自治体' : 'contract/国';
   return s[0] || 'root';
 };

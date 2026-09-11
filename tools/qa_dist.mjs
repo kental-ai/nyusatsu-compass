@@ -51,8 +51,13 @@ for (const f of files) {
   const html = readFileSync(f, 'utf8');
   const body = stripJs(html);
 
-  for (const pat of ['>undefined<', '>NaN<', 'NaN円', 'NaN%', 'Invalid Date', '[object Object]', '>null<', 'undefined件', 'undefined円']) {
-    if (body.includes(pat)) add(`漏出: ${pat}`, rel);
+  {
+    // 本文テキスト（タグ除去後）に対して検査する。位置を問わず拾う
+    const text = body.replace(/<[^>]+>/g, ' ');
+    for (const re of [/undefined/, /NaN/, /Invalid Date/, /\[object Object\]/, />null</, /。。/, /（）/, /、、/, /です。です/, /ます。ます/]) {
+      const m = text.match(re) || (re.source === '>null<' ? body.match(re) : null);
+      if (m) add(`漏出: ${re.source}`, `${rel}  …${text.slice(Math.max(0, m.index - 24), m.index + 30).replace(/\s+/g, ' ')}…`);
+    }
   }
   const title = (html.match(/<title>([^<]*)<\/title>/) || [])[1] || '';
   if (!title.trim()) add('titleなし', rel);
