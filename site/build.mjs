@@ -71,6 +71,8 @@ for (const a of AWARDS) a.winner_name = normDisp(a.winner_name);
 let LOCALS = [];
 try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year, planned_price, floor_price, bidders FROM local_awards ORDER BY open_date DESC`).all(); } catch { try { LOCALS = db.prepare(`SELECT org, dept, pref, name, open_date, category, method, winner_name, corporate_no, amount, slug, fiscal_year FROM local_awards ORDER BY open_date DESC`).all(); } catch {} }
 for (const a of LOCALS) a.winner_name = normDisp(a.winner_name);
+// 千葉県の入札結果は方式名が「事後審査）千葉県」「事後審査）市町村」と途中で切れて取り込まれている。表示用に補う
+for (const a of LOCALS) if (a.method && a.method.startsWith('事後審査）')) a.method = `一般競争（事後審査・${a.method.slice(5)}）`;
 const byCorpLocal = new Map();
 for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? byCorpLocal.set(a.corporate_no, []).get(a.corporate_no)).push(a);
 const PREF_SLUGS = {
@@ -178,11 +180,14 @@ const organHref = (code) => (code && MINISTRIES[code] && (byMinistry.get(code) |
 const organLink = (code, label) => organHref(code) ? `<a href="${organHref(code)}">${label}</a>` : label;
 
 // 案件名クラスタ（同一契約の年次繰り返しを検出。企業ページの「契約ヒストリー」と次回予測の基盤）
-const normName = (n) => n.replace(/令和\d+年度?|平成\d+年度?|Ｒ\d+|R\d+|[０-９0-9]+|（[^）]*）|\([^)]*\)|【[^】]*】|[　\s]/g, '');
+const normName = (n) => n.replace(/(令和|平成)元(年)/g, '$1$2').replace(/令和\d+年度?|平成\d+年度?|Ｒ\d+|R\d+|[０-９0-9]+|（[^）]*）|\([^)]*\)|【[^】]*】|[　\s]/g, '');
 // 「同じ中身で区域・対象だけが違う契約」をまとめる。
 // 例: 国土交通省の「単価契約三重県内凍結防止剤購入」と「単価契約飯田国道管内凍結防止剤購入」は、
 // 工区が違うだけの別契約で、落札者も金額も違う。隣の工区の結果は値付けの material になるので束ねて見せる。
 // 案件名の文字バイグラムのJaccard係数で、同じ発注機関の中だけを対象にクラスタリングする。
+// 工程ごとの経過時間（Netlifyの15分上限に対する監視用。stderrに出す）
+const BUILD_T0 = Date.now();
+const lapLog = (label) => console.error(`[${((Date.now() - BUILD_T0) / 1000).toFixed(0).padStart(4)}s] ${label}`);
 const famBigrams = (s) => { const g = new Set(); for (let i = 0; i + 2 <= s.length; i++) g.add(s.slice(i, i + 2)); return g; };
 const famJaccard = (a, b) => { let c = 0; for (const x of a) if (b.has(x)) c++; return c / (a.size + b.size - c); };
 // items: [{ key, nn, group }] を受け取り、key → 同族keyの配列 を返す
@@ -191,15 +196,18 @@ function buildFamilies(items, minJac = 0.45, maxFam = 40) {
   for (const it of items) { it.g = famBigrams(it.nn); (byGroup.get(it.group) ?? byGroup.set(it.group, []).get(it.group)).push(it); }
   const out = new Map();
   for (const [, arr] of byGroup) {
+    // ありふれたバイグラムは候補生成に使わない（それしか共有しない組は Jaccard が低く、どのみち同族にならない）
+    const df = new Map();
+    for (const it of arr) for (const g of it.g) df.set(g, (df.get(g) || 0) + 1);
     const inv = new Map();
-    for (const it of arr) for (const g of it.g) { const a = inv.get(g) ?? inv.set(g, []).get(g); if (a.length < 400) a.push(it); }
+    for (const it of arr) for (const g of it.g) if (df.get(g) <= 150) (inv.get(g) ?? inv.set(g, []).get(g)).push(it);
     const taken = new Set();
     for (const it of arr) {
       if (taken.has(it.key)) continue;
-      const cand = new Map();
-      for (const g of it.g) for (const o of (inv.get(g) || [])) if (o !== it && !taken.has(o.key)) cand.set(o.key, o);
+      const cand = new Set();
+      for (const g of it.g) { const a = inv.get(g); if (a) for (const o of a) if (o !== it && !taken.has(o.key)) cand.add(o); }
       const group = [it];
-      for (const o of cand.values()) { if (group.length >= maxFam) break; if (famJaccard(it.g, o.g) >= minJac) group.push(o); }
+      for (const o of cand) { if (group.length >= maxFam) break; if (famJaccard(it.g, o.g) >= minJac) group.push(o); }
       if (group.length < 2) continue;
       const keys = group.map((o) => o.key);
       for (const o of group) { taken.add(o.key); out.set(o.key, keys); }
@@ -246,6 +254,7 @@ for (const [key, arr] of clusters) {
 }
 const contractIdByKey = new Map([...CONTRACTS].map(([id, c]) => [c.key, id]));
 // 国の同種契約ファミリー。継続契約に限らず全クラスタを対象にする（隣が単発でも比較材料になるため）
+lapLog('索引: 国の契約クラスタまで');
 const FAMILY = buildFamilies([...clusters.keys()].map((k) => {
   const i = k.lastIndexOf('|');
   return { key: k, nn: k.slice(0, i), group: k.slice(i + 1) };
@@ -286,6 +295,7 @@ for (const [key, arr] of localClusters) {
   for (const a of arr) if ((a.open_date || '') > (best.open_date || '')) best = a;
   lclusterMeta.set(key, { pref: best.pref, org: best.org, nn: key.slice(0, key.lastIndexOf('|')), last: best });
 }
+lapLog('索引: 国ファミリー完了');
 const LFAMILY = buildFamilies([...lclusterMeta.entries()].map(([key, m]) => ({ key, nn: m.nn, group: m.pref || '?' })).filter((x) => x.nn.length >= 8), 0.5, 30);
 
 const lcByOrg = new Map(); // '県|org' → [[id, c]] 件数順（美郷町のように同名の自治体が複数県にあるため県で修飾）
@@ -354,6 +364,7 @@ const noticeKeys = new Set(NOTICES.map((n) => normName(n.name)));
 
 // 公告を正規化案件名で索引する。継続契約ページで「例年◯月頃（落札月からの逆算）」と推定していたところを、
 // 実際に公告が出た日で書けるようにするためのもの。keyで重複を除いてから引く。
+lapLog('索引: 自治体ファミリー完了');
 const noticeByNorm = new Map();
 {
   const seenKey = new Set();
@@ -554,6 +565,13 @@ function bandTable(list) {
     `<tr><td>${r.b.label}</td><td class="num">${r.n.toLocaleString()}</td><td class="num">${yen(r.med)}</td></tr>`).join('\n')}</table></div>`;
 }
 
+// 集計用: 同じ名前で毎年出ている契約のうち、別案件が混ざっていなさそうなもの（年1回程度・金額の幅3倍未満）
+const stableCluster = (arr, dateKey) => {
+  const ys = new Set(arr.map((a) => (a[dateKey] || '').slice(0, 4))); ys.delete('');
+  if (!ys.size || arr.length / ys.size >= 1.8) return false;
+  const am = arr.map((a) => a.amount).filter((x) => x > 0);
+  return am.length < 2 || Math.max(...am) / Math.min(...am) < 3;
+};
 // 昇順の金額配列から分布の要約（件数・四分位・中央値・最大最小）
 const quart = (amts) => {
   const a = [...amts].filter((x) => x > 0).sort((x, y) => x - y);
@@ -943,7 +961,15 @@ ${GUIDE_HOSHIKI}` : '';
 
   // ---- 公告の実績（落札月からの逆算ではなく、実際に公告が出た日）----
   // 公告アーカイブと案件名で突き合わせる。発注機関名の食い違いによる誤結合を避けるため府省名の前方一致も課す。
-  const ntsAll = (noticeByNorm.get(normName(name)) || []).filter((n) => n.org && n.org.startsWith(mname));
+  const ntsAll = (() => {
+    const byDay = new Map();
+    for (const n of (noticeByNorm.get(normName(name)) || [])) {
+      if (!n.org || !n.org.startsWith(mname)) continue;
+      const cur = byDay.get(n.issue_date);
+      if (!cur || n.org.length > cur.org.length) byDay.set(n.issue_date, n);
+    }
+    return [...byDay.values()].sort((x, y) => (x.issue_date < y.issue_date ? 1 : -1));
+  })();
   const leadDays = [];
   const pairRows = [];
   for (const n of ntsAll) {
@@ -979,7 +1005,7 @@ ${nOrgs.length ? `<p>公告を出している部局は${nOrgs.length === 1 ? `<b
   for (const x of [{ a: last }, ...famAll]) { const w = x.a.winner_name; if (w) famWinners.set(w, (famWinners.get(w) || 0) + 1); }
   const famTopW = [...famWinners.entries()].sort((x, y) => y[1] - x[1])[0];
   const famSec = famRows.length ? `<h2>区域・対象を変えて別に出ている同種の契約</h2>
-<p>${esc(mname)}は、この契約とほぼ同じ内容の契約を、区域や対象を分けて<b>${famAll.length + 1}本</b>発注しています。同じ仕様でも区域が違えば落札者も金額も変わるため、隣の契約でいくらついたかは、自社の値付けを考えるときの手がかりになります。規模の近い順に並べました。</p>
+<p>${esc(mname)}は、この契約とほぼ同じ内容の契約を、区域や対象を分けて<b>${famAll.length + 1}本</b>発注しています。名称がほぼ同じ契約でも、区域が違えば落札者も金額も変わります。隣の契約でいくらついたかは、自社の値付けを考えるときの手がかりになります。規模の近い順に並べました。</p>
 <div class="wrap"><table><tr><th>契約名</th><th>直近の落札</th><th>落札額</th><th>落札者</th></tr>
 <tr style="background:#FFF6E9"><td><b>${esc(name)}</b>（このページ）</td><td class="num">${last.award_date.slice(0, 4)}年</td><td class="num">${yen(last.amount)}</td><td>${esc(last.winner_name)}</td></tr>
 ${famRows.slice(0, 8).map((x) => `<tr><td>${x.id ? `<a href="/contract/${x.id}/">${esc(x.a.name)}</a>` : esc(x.a.name)}</td><td class="num">${(x.a.award_date || '').slice(0, 4)}年</td><td class="num">${gM(yen(x.a.amount))}</td><td>${gM(companyLink(x.a.corporate_no, esc(x.a.winner_name)), '●●●●')}</td></tr>`).join(String.fromCharCode(10))}</table></div>
@@ -1038,6 +1064,7 @@ ${sibSecN}
 <p>${slug && slug !== 'other' ? `<a href="/price/${slug}/">→ ${LABEL[slug]}の相場・類似案件検索</a> ／ ` : ''}${organHref(ministry) ? `<a href="${organHref(ministry)}">→ ${esc(mname)}の入札結果を見る</a>` : `<a href="/organ/">→ 発注機関別の落札結果を見る</a>`}</p>`,
   });
 }
+lapLog('契約ページ（国）完了');
 // 機関別の契約一覧（ページネーション）+ 全体ハブ
 const CPER = 200;
 for (const [mcode, list] of contractsByMinistry) {
@@ -1048,7 +1075,7 @@ for (const [mcode, list] of contractsByMinistry) {
   const hubProse = (() => {
     const yrsAvg = Math.round(list.reduce((s, [, c]) => s + c.years, 0) / list.length * 10) / 10;
     let sw = 0, pairs = 0;
-    for (const [, c] of list) for (let i = 0; i < c.arr.length - 1; i++) { if (!c.arr[i].corporate_no || !c.arr[i + 1].corporate_no) continue; pairs++; if (c.arr[i].corporate_no !== c.arr[i + 1].corporate_no) sw++; }
+    for (const [, c] of list) { if (!stableCluster(c.arr, 'award_date')) continue; for (let i = 0; i < c.arr.length - 1; i++) { if (!c.arr[i].corporate_no || !c.arr[i + 1].corporate_no) continue; pairs++; if (c.arr[i].corporate_no !== c.arr[i + 1].corporate_no) sw++; } }
     const swRate = pairs >= 20 ? Math.round(sw / pairs * 100) : null;
     const catCnt = new Map();
     for (const [, c] of list) if (c.slug && c.slug !== 'other' && LABEL[c.slug]) catCnt.set(c.slug, (catCnt.get(c.slug) || 0) + 1);
@@ -1466,6 +1493,7 @@ ${faqHtml}`,
 }
 
 let catIndexHtml = '';
+lapLog('企業ページ（国）完了');
 // 業種別の企業索引（主戦場=最頻分野で企業を引ける。企業ページへの第3のクロール経路）
 {
   const byPrimaryCat = new Map();
@@ -1549,13 +1577,13 @@ for (const [code, list] of byMinistry) {
     const mTot = [...mCnt.values()].reduce((s, x) => s + x, 0);
     const conts = [...CONTRACTS.values()].filter((c) => c.ministry === code);
     let sw = 0, pairs = 0;
-    for (const c of conts) for (let i = 0; i < c.arr.length - 1; i++) { if (!c.arr[i].corporate_no || !c.arr[i + 1].corporate_no) continue; pairs++; if (c.arr[i].corporate_no !== c.arr[i + 1].corporate_no) sw++; }
+    for (const c of conts) { if (!stableCluster(c.arr, 'award_date')) continue; for (let i = 0; i < c.arr.length - 1; i++) { if (!c.arr[i].corporate_no || !c.arr[i + 1].corporate_no) continue; pairs++; if (c.arr[i].corporate_no !== c.arr[i + 1].corporate_no) sw++; } }
     const swRate = pairs >= 20 ? Math.round(sw / pairs * 100) : null;
     const catCnt = new Map();
     for (const a of list) if (a.slug && a.slug !== 'other' && LABEL[a.slug]) catCnt.set(a.slug, (catCnt.get(a.slug) || 0) + 1);
     const catTop = [...catCnt.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3);
     return `<h2>${esc(name)}の発注の全体像</h2>
-<p>${esc(name)}が公表した落札結果を<b>${list.length.toLocaleString()}件</b>収録しています（${list[list.length - 1]?.award_date.slice(0, 7)}〜${list[0]?.award_date.slice(0, 7)}）。${q ? `落札額は下位25%が${yen(q.q1)}以下、中央値が<b>${yen(q.med)}</b>、上位25%が${yen(q.q3)}以上で、最大は${yen(q.max)}です。${q.max >= q.med * 100 ? '少額の物品・役務が件数の大半を占め、ごく一部の大型案件が総額を押し上げる構成です。件数で見るか金額で見るかで、この機関の姿はまったく違って見えます。' : q.max >= q.med * 10 ? '中心となる規模帯の上に、年に数件の大型案件が乗る構成です。' : '極端な大型案件は少なく、そろった規模帯で発注されています。'}` : ''}</p>
+<p>${esc(name)}が公表した落札結果を<b>${list.length.toLocaleString()}件</b>収録しています（${list[list.length - 1]?.award_date.slice(0, 7)}〜${list[0]?.award_date.slice(0, 7)}）。${q ? `落札額は下位25%が${yen(q.q1)}以下、中央値が<b>${yen(q.med)}</b>、上位25%が${yen(q.q3)}以上で、最大は${yen(q.max)}です。${q.max >= q.med * 100 ? '件数の中心は中央値付近の案件で、ごく一部の大型案件が総額を押し上げる構成です。件数で見るか金額で見るかで、この機関の姿はまったく違って見えます。' : q.max >= q.med * 10 ? '中心となる規模帯の上に、年に数件の大型案件が乗る構成です。' : '極端な大型案件は少なく、そろった規模帯で発注されています。'}` : ''}</p>
 ${yr.length >= 3 ? `<p>年別の落札件数は${yr.map(([y, n]) => `${y}年${n.toLocaleString()}件`).join('、')}です。${yr[yr.length - 1][1] > yr[0][1] * 1.3 ? '直近ほど件数が多く、発注量が広がっています。' : yr[yr.length - 1][1] * 1.3 < yr[0][1] ? '直近の年は件数が減っています（年度途中の集計を含みます）。' : '年による大きな増減はなく、安定して発注が出る機関です。'}</p>` : ''}
 ${mTop.length && mTot >= 20 ? `<p>入札方式は${mTop.map(([l, n]) => `${esc(l)}が${n.toLocaleString()}件（${Math.round(n / mTot * 100)}%）`).join('、')}${mCnt.size > 3 ? `、ほか${mCnt.size - 3}方式` : ''}です。${mTop[0][1] / mTot >= 0.7 ? `${esc(mTop[0][0])}が大半を占め、この機関では基本的にその土俵で競うことになります。` : '方式が分かれており、案件ごとに勝ち筋が変わります。'}<a href="/guide/hoshiki/">方式ごとの違い</a>もあわせてご覧ください。</p>` : ''}
 ${cc.firms >= 10 ? `<p>落札した事業者は<b>${cc.firms.toLocaleString()}社</b>で、上位5社が全体の<b>${cc.share5}%</b>を占めます。${cc.share5 >= 40 ? '特定の事業者に受注が集まる機関です。常連が押さえていない分野から入るのが現実的です。' : cc.share5 <= 15 ? '受注は広く分散しており、常連の独占という状態ではありません。' : '受注はほどよく分散しています。'}</p>` : ''}
@@ -1732,7 +1760,7 @@ ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
     const catTop = [...catCnt.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5);
     const conts = lcByPref.get(prefName) || [];
     let sw = 0, pairs = 0;
-    for (const [, lc] of conts) for (let i = 0; i < lc.arr.length - 1; i++) { pairs++; if ((lc.arr[i].corporate_no || lc.arr[i].winner_name) !== (lc.arr[i + 1].corporate_no || lc.arr[i + 1].winner_name)) sw++; }
+    for (const [, lc] of conts) { if (!stableCluster(lc.arr, 'open_date')) continue; for (let i = 0; i < lc.arr.length - 1; i++) { pairs++; if ((lc.arr[i].corporate_no || lc.arr[i].winner_name) !== (lc.arr[i + 1].corporate_no || lc.arr[i + 1].winner_name)) sw++; } }
     const swRate = pairs >= 30 ? Math.round(sw / pairs * 100) : null;
     const mo = Array(12).fill(0);
     for (const a of plist) { const mm = +(a.open_date || '').slice(5, 7); if (mm) mo[mm - 1]++; }
@@ -1741,7 +1769,7 @@ ${plist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
 <p>${esc(prefName)}と県内市町村が公表した落札結果を<b>${plist.length.toLocaleString()}件</b>収録しています（${(plist[plist.length - 1]?.open_date || '').slice(0, 7)}〜${(plist[0]?.open_date || '').slice(0, 7)}）。うち県自身の発注が${prefOwn.toLocaleString()}件、市町村など${orgCnt.size - (prefOwn ? 1 : 0)}団体の発注が${(plist.length - prefOwn).toLocaleString()}件です。${q ? `落札額は下位25%が${yen(q.q1)}以下、中央値が<b>${yen(q.med)}</b>、上位25%が${yen(q.q3)}以上、最大は${yen(q.max)}です。` : ''}</p>
 ${catTop.length ? `<p>分野別に多いのは${catTop.map(([s, n]) => `${prefCatPages.has(s + '|' + pslug) ? `<a href="/price/${s}/${pslug}/">${LABEL[s]}</a>` : LABEL[s]}（${n.toLocaleString()}件）`).join('、')}です。</p>` : ''}
 ${rateAvg !== null ? `<p>予定価格が公表された${rs.length.toLocaleString()}件の平均落札率は<b>${rateAvg}%</b>${bidAvg !== null ? `、平均応札社数は<b>${bidAvg}社</b>` : ''}です。${rateAvg >= 95 ? '予定価格に近い水準で決まっており、値引き競争は起きにくい県です。' : rateAvg <= 85 ? '予定価格からかなり下がった水準で決まっており、価格勝負の色が濃い県です。' : '落札率は中位です。'}</p>` : ''}
-${cc.firms >= 20 ? `<p>落札した事業者は<b>${cc.firms.toLocaleString()}社</b>、上位5社のシェアは<b>${cc.share5}%</b>です。${cc.share5 >= 30 ? '常連への集中が見られます。' : '受注は広く分散しています。'}${swRate !== null ? `毎年繰り返し出る継続契約${conts.length.toLocaleString()}本では、年をまたぐ入札の<b>${swRate}%</b>で落札者が交代しています。` : ''}</p>` : ''}
+${cc.firms >= 20 ? `<p>落札した事業者は<b>${cc.firms.toLocaleString()}社</b>、上位5社のシェアは<b>${cc.share5}%</b>です。${cc.share5 >= 30 ? '常連への集中が見られます。' : '受注は広く分散しています。'}${swRate !== null ? `毎年繰り返し出る継続契約${conts.length.toLocaleString()}本のうち、別案件の混在がなさそうな${pairs.toLocaleString()}回の年またぎ入札で見ると、<b>${swRate}%</b>で落札者が交代しています。` : ''}</p>` : ''}
 ${topMo.length >= 2 && topMo[0][1] > 0 ? `<p>開札が多いのは${topMo.map(([m, n]) => `<b>${m}月</b>（${n.toLocaleString()}件）`).join('、')}です。${topMo[0][0] >= 4 && topMo[0][0] <= 6 ? '年度初めに集中する形で、前年度の1〜3月に公告の準備が進むことが多い県です。' : topMo[0][0] <= 3 ? '年度末に集中する形です。' : '年度の中盤に集まる形です。'}</p>` : ''}
 ${yr.length >= 3 ? `<p>年別の件数は${yr.map(([y, n]) => `${y}年${n.toLocaleString()}件`).join('、')}です。収録の開始時期が団体ごとに違うため、増減には収録の進行も含まれます。</p>` : ''}`;
   })() : '';
@@ -1836,16 +1864,16 @@ ${olist.slice(0, 30).map((a) => `<tr><td>${a.open_date}</td><td>${esc(a.name)}</
       // 継続契約の交代率
       const lcs = lcByOrg.get(prefName + '|' + city) || [];
       let sw = 0, chances = 0;
-      for (const [, lc] of lcs) for (let i = 0; i < lc.arr.length - 1; i++) { chances++; if ((lc.arr[i].corporate_no || lc.arr[i].winner_name) !== (lc.arr[i + 1].corporate_no || lc.arr[i + 1].winner_name)) sw++; }
+      for (const [, lc] of lcs) { if (!stableCluster(lc.arr, 'open_date')) continue; for (let i = 0; i < lc.arr.length - 1; i++) { chances++; if ((lc.arr[i].corporate_no || lc.arr[i].winner_name) !== (lc.arr[i + 1].corporate_no || lc.arr[i + 1].winner_name)) sw++; } }
       const swRate = chances >= 10 ? Math.round(sw / chances * 100) : null;
       return `<h2>${esc(city)}の入札の全体像</h2>
-<p>${esc(city)}が公表した入札結果を<b>${olist.length.toLocaleString()}件</b>収録しています（${(olist[olist.length - 1]?.open_date || '').slice(0, 7)}〜${(olist[0]?.open_date || '').slice(0, 7)}）。落札額は下位25%が${yen(q1)}以下、中央値が<b>${yen(med)}</b>、上位25%が${yen(q3)}以上という分布です。${am.length >= 10 ? `最大は${yen(am[am.length - 1])}、最小は${yen(am[0])}で、${am[am.length - 1] >= med * 50 ? '少額の物品・役務が数の大半を占めつつ、年に数件の大型工事が総額を押し上げる形です。数の多い帯と金額の大きい帯では、競合の顔ぶれがまったく違います' : '極端な大型案件はなく、比較的そろった規模帯で発注されています'}。` : ''}</p>
+<p>${esc(city)}が公表した入札結果を<b>${olist.length.toLocaleString()}件</b>収録しています（${(olist[olist.length - 1]?.open_date || '').slice(0, 7)}〜${(olist[0]?.open_date || '').slice(0, 7)}）。落札額は下位25%が${yen(q1)}以下、中央値が<b>${yen(med)}</b>、上位25%が${yen(q3)}以上という分布です。${am.length >= 10 ? `最大は${yen(am[am.length - 1])}、最小は${yen(am[0])}で、${am[am.length - 1] >= med * 50 ? '件数の中心は中央値付近の案件で、年に数件の大型案件が総額を押し上げる形です。数の多い帯と金額の大きい帯では、競合の顔ぶれがまったく違います' : '極端な大型案件はなく、比較的そろった規模帯で発注されています'}。` : ''}</p>
 ${rk ? `<p>${esc(prefName)}内で当サイトが落札結果を収録している${cityRank.length}団体のなかでは、件数で<b>${rk}位</b>にあたります。中央値${yen(med)}は${prefMedAll ? `県全体の中央値${yen(prefMedAll)}と比べて${med > prefMedAll * 1.2 ? '高め' : med < prefMedAll * 0.8 ? '低め' : 'ほぼ同水準'}です` : 'この団体の規模を示す目安になります'}。${med > prefMedAll * 1.2 ? '1件あたりが大きい分、参加資格や実績要件が効いてくる案件の比率も高くなります。' : med < prefMedAll * 0.8 ? '1件あたりが小さい分、小規模な事業者でも入りやすい構成です。' : ''}</p>` : ''}
 ${yr.length >= 3 ? `<p>年別の落札件数は${yr.map(([y, n]) => `${y}年${n.toLocaleString()}件`).join('、')}と推移しています。${yr[yr.length - 1][1] > yr[0][1] * 1.3 ? '収録の進行によるものか実際の発注増かは切り分けられませんが、直近ほど件数が多くなっています。' : yr[yr.length - 1][1] * 1.3 < yr[0][1] ? '直近の年は件数が少なくなっています。年度途中である場合も含まれます。' : '年による大きな増減はありません。'}</p>` : ''}
 ${rateAvg !== null ? `<p>予定価格が公表された案件で見ると、平均落札率は<b>${rateAvg}%</b>${bidAvg !== null ? `、平均応札社数は<b>${bidAvg}社</b>` : ''}でした。${rateAvg >= 95 ? '予定価格に近い水準で決まっており、値引き競争は起きにくい市場です。価格を削るより、参加資格と仕様要件を満たすことが先になります。' : rateAvg <= 85 ? '予定価格からかなり下がった水準で決まっており、価格勝負の色が濃い市場です。積算の精度がそのまま結果に出ます。' : '落札率は中位です。価格と要件の両方が効きます。'}${bidAvg !== null && bidAvg >= 5 ? `応札が平均${bidAvg}社と多く、1件あたりの競争は厳しめです。` : bidAvg !== null && bidAvg <= 2.5 ? `応札は平均${bidAvg}社で、参加者が少ない案件が目立ちます。要件を満たせれば勝ちに行きやすい環境です。` : ''}</p>` : ''}
 ${corpN.size >= 5 ? `<p>落札した事業者は<b>${corpN.size.toLocaleString()}社</b>で、上位5社が全体の<b>${share5}%</b>を占めています。${share5 >= 50 ? '特定の事業者に受注が集まっており、常連が固まっている市場です。新規で入るなら、常連が取っていない業務分野から探すのが現実的です。' : share5 <= 25 ? '受注は多くの事業者に分散しており、常連が独占している状態ではありません。要件を満たせば入り込む余地があります。' : '受注はほどよく分散しています。'}</p>` : ''}
-${topMo.length >= 2 ? `<p>開札が多いのは${topMo.map(([m, n]) => `<b>${m}月</b>（${n.toLocaleString()}件）`).join('、')}です。${topMo[0][0] >= 4 && topMo[0][0] <= 6 ? '年度が始まってすぐの時期に発注が集中しており、前年度の1〜3月には公告の準備が進んでいることになります。この時期に資格を整えておかないと1年待つことになります。' : topMo[0][0] >= 1 && topMo[0][0] <= 3 ? '年度末に開札が集中する形です。予算の消化と次年度の準備が重なる時期で、案件が一度に出ます。' : '年度の中盤に発注が集まる形です。'}</p>` : ''}
-${swRate !== null ? `<p>${esc(city)}が毎年繰り返し発注している契約${lcs.length.toLocaleString()}本を追うと、年をまたぐ入札の<b>${swRate}%</b>で落札者が交代しています。${swRate >= 40 ? '入れ替わりは活発で、現職がいても取りに行く余地があります。' : swRate <= 15 ? '同じ事業者が取り続ける契約が多く、参入のハードルは高めです。既存の受託者が抜ける年を狙うことになります。' : '交代はときどき起きる程度です。'}</p>` : ''}`;
+${topMo.length >= 2 ? `<p>開札が多いのは${topMo.map(([m, n]) => `<b>${m}月</b>（${n.toLocaleString()}件）`).join('、')}です。${topMo[0][0] >= 4 && topMo[0][0] <= 6 ? '年度が始まってすぐの時期に発注が集中しています。前年度の1〜3月に公告の準備が進むことが多く、この時期までに資格を整えておかないと1年待つことになりがちです。' : topMo[0][0] >= 1 && topMo[0][0] <= 3 ? '年度末に開札が集中する形です。予算の消化と次年度の準備が重なる時期で、案件が一度に出ます。' : '年度の中盤に発注が集まる形です。'}</p>` : ''}
+${swRate !== null ? `<p>${esc(city)}が毎年繰り返し発注している契約${lcs.length.toLocaleString()}本のうち、別案件の混在がなさそうな${chances.toLocaleString()}回の年またぎ入札で見ると、<b>${swRate}%</b>で落札者が交代しています。${swRate >= 40 ? '入れ替わりは活発で、現職がいても取りに行く余地があります。' : swRate <= 15 ? '同じ事業者が取り続ける契約が多く、参入のハードルは高めです。既存の受託者が抜ける年を狙うことになります。' : '交代はときどき起きる程度です。'}</p>` : ''}`;
     })() : '';
 
     page(`/local/${pslug}/${city}/`, {
@@ -1912,6 +1940,7 @@ ${[...allPrefs].filter((pn) => PREF_SLUGS[pn]).map((pn) => ({ pn, n: (noticeByPr
   });
 }
 
+lapLog('地域ページ完了');
 // 週間レポート（毎週自動で新ページが増える鮮度資産。過去26週分を遡って生成）
 {
   const companyFirst = new Map(); // corpNo → 初落札日
@@ -1968,7 +1997,8 @@ ${[...allPrefs].filter((pn) => PREF_SLUGS[pn]).map((pn) => ({ pn, n: (noticeByPr
       for (const a of list) if (a.slug && a.slug !== 'other' && LABEL[a.slug] && a.amount > 0) (catMed.get(a.slug) ?? catMed.set(a.slug, []).get(a.slug)).push(a.amount);
       const catRows = [...catMed.entries()].filter(([, v]) => v.length >= 5).map(([s, v]) => [s, v.length, median(v)]).sort((x, y) => y[1] - x[1]).slice(0, 5);
       return `<h2>この週の読み方</h2>
-<p>${label}の国の機関の落札は<b>${list.length.toLocaleString()}件</b>${prevList.length >= 50 ? `で、前週（${prevList.length.toLocaleString()}件）から${list.length > prevList.length * 1.2 ? '増えました' : list.length < prevList.length * 0.8 ? '減りました' : 'ほぼ横ばいです'}` : ''}。${q ? `落札額の中央値は<b>${yen(q.med)}</b>、上位25%は${yen(q.q3)}以上で、最大は${yen(q.max)}でした。` : ''}${big[0] && q && big[0].amount >= q.med * 100 ? `大型案件${big.filter((a) => a.amount >= q.med * 100).length}件が総額の大半を占めており、件数の中心は少額の物品・役務です。` : ''}</p>
+<p>${label}の国の機関の落札は<b>${list.length.toLocaleString()}件</b>${prevList.length >= 50 ? `で、前週（${prevList.length.toLocaleString()}件）から${list.length > prevList.length * 1.2 ? '増えました' : list.length < prevList.length * 0.8 ? '減りました' : 'ほぼ横ばいです'}` : ''}。${q ? `落札額の中央値は<b>${yen(q.med)}</b>、上位25%は${yen(q.q3)}以上で、最大は${yen(q.max)}でした。` : ''}${(() => { const tot = list.reduce((s, a) => s + (a.amount || 0), 0); const top10 = big.reduce((s, a) => s + (a.amount || 0), 0); const sh = tot ? Math.round(top10 / tot * 100) : 0;
+      return sh >= 50 ? `上位10件だけで総額の<b>${sh}%</b>を占めており、件数の中心は中央値付近の案件です。` : `上位10件の合計は総額の${sh}%で、金額は比較的分散した週です。`; })()}</p>
 ${minTop.length ? `<p>機関別では${minTop.map(([c, n]) => `${organLink(c, esc(MINISTRIES[c]))}（${n.toLocaleString()}件）`).join('、')}の順に多く出ました。</p>` : ''}
 ${mTop.length ? `<p>入札方式は${mTop.map(([l, n]) => `${esc(l)}が${n.toLocaleString()}件（${Math.round(n / list.length * 100)}%）`).join('、')}です。</p>` : ''}
 ${catRows.length ? `<p>分野ごとの中央値は${catRows.map(([s, n, m]) => `<a href="/price/${s}/">${LABEL[s]}</a>${yen(m)}（${n}件）`).join('、')}でした。${catStats.get(catRows[0][0]) ? `${LABEL[catRows[0][0]]}の通年の中央値は${yen(catStats.get(catRows[0][0]).med)}なので、この週は${catRows[0][2] > catStats.get(catRows[0][0]).med * 1.3 ? '大きめの案件が出た週です' : catRows[0][2] < catStats.get(catRows[0][0]).med * 0.7 ? '小口の案件が中心の週です' : '例年並みの規模でした'}。` : ''}</p>` : ''}
@@ -2242,7 +2272,7 @@ ${minRows.map(([c, o]) => `<tr><td>${organLink(c, esc(MINISTRIES[c]))}</td><td c
 <p>収録${all.length.toLocaleString()}件のうち、${topMo.length ? `公告が多い月は${topMo.map(([m, n]) => `<b>${m}月</b>（${n}件）`).join('、')}です。${topMo[0][0] >= 4 && topMo[0][0] <= 7 ? '年度初めに企画競争が集まる形で、前年度中に提案の骨子を用意しておくと間に合います。' : topMo[0][0] >= 1 && topMo[0][0] <= 3 ? '年度末に集中しており、次年度事業の受託者を年度内に決める運用です。' : '年度の中盤に出る案件が多い県です。'}` : '公告月の偏りは小さい県です。'}プロポーザルは公告から提出まで2〜4週間しかないことが多いため、時期の当たりをつけておくことが実務では効きます。</p>
 ${catTop.length ? `<p>分野では${catTop.map(([s, n]) => `${LABEL[s]}（${n}件）`).join('、')}の順に多く、${LABEL[catTop[0][0]]}系の企画競争が中心です。</p>` : ''}
 ${cityTop.length >= 2 ? `<p>出している団体は${cityTop.map(([c, n]) => `${cityPages.has(c) ? `<a href="/local/${pslug}/${encodeURIComponent(c)}/">${esc(c)}</a>` : esc(c)}（${n}件）`).join('、')}などです。</p>` : ''}
-${yr.length >= 2 ? `<p>年別の件数は${yr.map(([y, n]) => `${y}年${n}件`).join('、')}です。</p>` : ''}` : '';
+${yr.length >= 2 ? `<p>年別の件数は${yr.map(([y, n]) => `${y}年${n}件`).join('、')}です。履歴の収録は途中から始まっているため、増減には収録の進行が含まれます。</p>` : ''}` : '';
     })();
     page(`/proposal/${pslug}/`, {
       title: `${prefName}の公募・プロポーザル案件${cur.length ? `【募集中${cur.length}件・履歴${(cur.length + hist.length).toLocaleString()}件】` : `【履歴${hist.length.toLocaleString()}件を収録】`}｜${SITE}`,
@@ -3279,4 +3309,5 @@ shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
 writeFileSync(join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shards.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
 
+lapLog('全ページ生成完了');
 console.log(`生成完了: 計${urls.length}ページ（相場${priceCount}+地域相場${regionPriceCount}+満了レーダー${radarCount}+契約${contractCount}+地域${localPrefCount}県/${localCityCount}市区町村 / 企業${companyCount} / 機関${organCount}）→ site/dist`);
