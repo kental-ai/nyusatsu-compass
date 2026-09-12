@@ -30,7 +30,7 @@ const median = (arr) => { const a = [...arr].sort((x, y) => x - y); return a.len
 // 伏字・会員ゲート（無料会員で開く gM / ウォッチ会員限定 gP）は 2026-09-12 に全廃。数値はすべてそのまま表示する。
 // 伏字は「バグか、おかしなページか」という印象を与えるため（オーナー判断）。/alert/ は無料メール講座の登録ページとして残す。
 const ymLabel = (d) => { const m = /^(\d{4})-(\d{2})/.exec(d || ''); return m ? `${m[1]}年${Number(m[2])}月` : '最新'; };
-const CTA_LABEL = '無料メール講座を受け取る';
+const CTA_LABEL = '入札額の決め方講座（無料・全10回）を受け取る';
 // 全サイト唯一の出口。クエリは付けない（旧 /alert/?back=... は94,871通りに増えてクロール予算を食っていた）
 const cta = () => `<a class="btn" href="/alert/">${CTA_LABEL}</a>`;
 // 勝てる札の推定レンジ（参考値）: 前回額を中心に前回比トレンドを半分織り込み、-8%〜+4%
@@ -497,7 +497,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <header><div class="in"><a class="logo" href="/">${kun(30)}<span>${SITE}</span></a></div></header>
 <main>${crumbHtml}
 ${body}
-${path === '/alert/' || path === '/alert/thanks/' ? '' : `<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">札を入れる前に見るべき「数字の読み方」を、無料メール講座（全10回）でお届けします。</b><br>
+${path === '/alert/' || path === '/alert/thanks/' ? '' : `<div class="cta">${kun(52)}<div class="ctxt"><b class="mk">無料メール講座「入札額の決め方講座（全10回）」。いくらで入れるか、を過去の落札額から決める手順をお届けします。</b><br>
 このサイトのデータは、登録なしですべて閲覧できます。<br><br>
 ${cta()}</div></div>`}
 </main>
@@ -1596,11 +1596,12 @@ page('/organ/', {
 // アラートLP（POSTはNetlify Functionで中継。hidden formはNetlify Formsの検出用）
 const PREFS = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
 page('/alert/', {
-  title: `無料メール講座「データで勝つ入札講座」 | ${SITE}`,
-  desc: '札を入れる前に見るべき数字の読み方を、全10回の無料メール講座でお届けします。月1回の入札機会レポートも。サイトのデータはすべて登録なしで閲覧できます。',
-  body: `<h1>無料メール講座「データで勝つ入札講座」</h1>
+  title: `入札額の決め方講座（無料メール講座・全10回） | ${SITE}`,
+  desc: 'いくらで入れるか、を過去の落札額から決める手順を全10回の無料メール講座でお届けします。月1回、あなたの業種×地域の入札機会レポートも。サイトのデータはすべて登録なしで閲覧できます。',
+  body: `<h1>入札額の決め方講座（全10回）</h1>
+<p class="meta">無料メール講座 ── いくらで入れるか、を過去の落札額から決める</p>
 <p>${SITE}のデータは、すべて登録なしでご覧いただけます。メール登録は、データの読み方を学ぶ講座と月1回のレポートを受け取りたい方向けです。</p>
-<ul><li><b>無料メール講座「データで勝つ入札講座」全10回</b>（前回額の読み方、落札率の見方、継続契約の狙い方など）</li>
+<ul><li><b>入札額の決め方講座 全10回</b>（前回額の読み方 → 同種契約の相場 → 落札率 → 発注者と競合のクセ → 現職の固さ → 公告の時期 → 札を置く、の手順を1回1ステップで）</li>
 <li>月1回の「あなたの業種×地域の入札機会レポート」</li></ul>
 <p class="meta"><a href="/report/monthly/sample/">→ 月次レポートの一例を見る</a></p>
 <p id="invalidmsg" class="meta" style="display:none;color:#B8432F">リンクが無効でした。下のフォームから登録し直してください。</p>
@@ -1626,13 +1627,13 @@ page('/alert/welcome/', {
   desc: '入札コンパスの無料メール講座の本登録が完了しました。',
   noindex: true,
   body: `<div style="text-align:center;margin:24px 0">${kun(90, 'salute')}</div><h1 style="text-align:center">本登録が完了しました!</h1>
-<p style="text-align:center"><b>無料メール講座「データで勝つ入札講座」を、順にお届けします。</b></p>
+<p style="text-align:center"><b>「入札額の決め方講座（全10回）」を、順にお届けします。</b></p>
 <p style="text-align:center"><a class="btn" href="/contract/">継続契約データベースを見る</a></p>
 <p class="meta" style="text-align:center">サイトのデータは登録の有無にかかわらず、すべてご覧いただけます。</p>`,
 });
 page('/alert/thanks/', {
   title: `登録ありがとうございます | ${SITE}`,
-  desc: '入札コンパスの無料メール講座「データで勝つ入札講座」の登録を受け付けました。届いたメールのリンクを開くと本登録が完了し、講座の配信が始まります。',
+  desc: '入札コンパスの無料メール講座「入札額の決め方講座（全10回）」の登録を受け付けました。届いたメールのリンクを開くと本登録が完了し、講座の配信が始まります。',
   noindex: true,
   body: `<div style="text-align:center;margin:24px 0">${kun(90, 'salute')}</div><h1 style="text-align:center">登録ありがとうございます!</h1>
 <p style="text-align:center"><b>届いたメールの「本登録する」リンクを開くと、講座の配信が始まります。</b></p>
@@ -3080,7 +3081,7 @@ page('/', {
   body: `<h1>いくらで入れるか、決める前に見る。</h1>
 <p>官公庁入札の落札結果${AWARDS.length.toLocaleString()}件から、この契約は前回いくらで誰が取ったか・類似案件の相場・競合の価格帯を、札を入れる前に数分で。すべて登録なしで閲覧できます。</p>
 ${statBoxes([['落札実績', AWARDS.length.toLocaleString() + '件'], ['収録企業', companyCount.toLocaleString() + '社'], ['収録機関', organCount + '機関'], ['データ期間', '2013年度〜']])}
-<div class="cta"><div class="ctxt"><b class="mk">札を入れる前に見るべき「数字の読み方」を、無料メール講座（全10回）でお届けします。</b><br>メール登録だけ。<br><br>${cta()}</div></div>
+<div class="cta"><div class="ctxt"><b class="mk">無料メール講座「入札額の決め方講座（全10回）」。いくらで入れるか、を過去の落札額から決める手順をお届けします。</b><br>メール登録だけ。<br><br>${cta()}</div></div>
 <h2>業務別の落札相場</h2>
 <ul>${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).slice(0, 12)
   .map((t) => `<li><a href="/price/${t.slug}/">${t.label}の落札相場</a></li>`).join('')}</ul>
@@ -3175,8 +3176,8 @@ function render(){
   +'<h3>発注が多い機関</h3><ul>'+c.topMins.map(function(m){return '<li><a href="/organ/'+m[0].toLowerCase()+'/">'+esc(S.mins[m[0]]||m[0])+'</a>（'+m[1].toLocaleString()+'件）</li>'}).join('')+'</ul>'
   +(op&&op.sample.length?'<h3>いま公告中の案件（例）</h3><ul>'+op.sample.slice(0,4).map(function(x){return '<li>'+esc(x.name)+'（'+esc(x.org)+(x.deadline?'・入札 '+x.deadline:'')+'）'+(x.url?' <a href="'+x.url+'" rel="nofollow noopener" target="_blank">原文</a>':'')+'</li>'}).join('')+'</ul>':'')
   +'<div id="steiban"><p class="meta">定番案件を分析中…</p></div>'
-  +'<div class="cta"><div class="ctxt"><b class="mk">札を入れる前に見るべき「数字の読み方」を、無料メール講座（全10回）でお届けします。</b><br>メール登録だけ。<br><br>'
-  +'<a class="btn" href="/alert/">無料メール講座を受け取る</a></div></div>';
+  +'<div class="cta"><div class="ctxt"><b class="mk">無料メール講座「入札額の決め方講座（全10回）」。いくらで入れるか、を過去の落札額から決める手順をお届けします。</b><br>メール登録だけ。<br><br>'
+  +'<a class="btn" href="/alert/">入札額の決め方講座（無料・全10回）を受け取る</a></div></div>';
  sout.innerHTML=html;
  var render_id=slug+'|'+pref;sout.dataset.rid=render_id;
  (CATD[slug]?Promise.resolve(CATD[slug]):fetch('/price/'+slug+'/data.json').then(function(r){return r.json()}).then(function(j){CATD[slug]=j;return j}))
