@@ -1,7 +1,12 @@
 // 週次セルフ監査: 本番サイト・sitemap整合・データソース生存を機械チェック。
 // 失敗時はexit 1（GitHub Actionsの失敗通知がそのままアラートになる）。
 const ORIGIN = 'https://nyusatsu-compass.com';
+// 2026-10-07: 日次ルーティン（daily-local-awards / daily-rebuild）を停止中のため、
+// 「鮮度」系のチェックは当然のように失敗する。見張りとしての価値がないので飛ばす。
+// 日次を再開したら false に戻す（docs/postmortem-2026-09-25.md・handoff-2026-09-12.md）。
+const DAILY_PAUSED = true;
 let failures = 0;
+const skip = (label, why) => console.log(`SKIP ${label} — ${why}`);
 const check = async (label, fn) => {
   try {
     const msg = await fn();
@@ -45,7 +50,7 @@ await check('sitemap整合', async () => {
   }
   return `${total} URLs`;
 });
-await check('週間レポートの鮮度', async () => {
+if (DAILY_PAUSED) skip('週間レポートの鮮度', '日次ビルド停止中'); else await check('週間レポートの鮮度', async () => {
   const t = await (await get(`${ORIGIN}/weekly/`)).text();
   const m = t.match(/\/weekly\/(\d{8})\//);
   if (!m) throw new Error('週次ページが見つからない');
@@ -54,7 +59,7 @@ await check('週間レポートの鮮度', async () => {
   if (ageDays > 21) throw new Error(`最新週報が${Math.round(ageDays)}日前 — 日次ビルドが止まっている可能性`);
   return `最新 ${m[1]}`;
 });
-await check('自治体データの鮮度（県ページのtitleから）', async () => {
+if (DAILY_PAUSED) skip('自治体データの鮮度', '日次収録停止中'); else await check('自治体データの鮮度（県ページのtitleから）', async () => {
   // 2026-08-23の事故（日次ワークフローのpush失敗・秋田の時間外取得）を二度と見逃さないための監視
   const stale = [];
   for (const [slug, name] of [['chiba', '千葉'], ['akita', '秋田'], ['shizuoka', '静岡'], ['miyazaki', '宮崎']]) {
