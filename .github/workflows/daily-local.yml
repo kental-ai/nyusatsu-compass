@@ -1,10 +1,10 @@
-# 自治体データの日次増分取得 → スナップショット更新をコミット（pushがNetlifyビルドを自動起動）。
+# 自治体データの週次増分取得 → スナップショット更新をコミット（pushがNetlifyビルドを自動起動）。
 # 対象は当年度のみ（過去分はバックフィル済みスナップショットに保持。公開保持期間が短いため
 # 「取り続けること」自体がアーカイブ資産になる）。
-name: daily-local-awards
+name: weekly-local-awards
 on:
   schedule:
-    - cron: '0 22 * * *'   # 22:00 UTC = 7:00 JST（秋田cals05の稼働時間は7:00〜24:00 JST。8:00の本ビルド前に完了させる）
+    - cron: '0 22 * * 0'   # 日曜22:00 UTC = 月曜7:00 JST（2026-10-24に日次から週次へ。秋田cals05の稼働時間は7:00〜24:00 JST）
   workflow_dispatch:
 permissions:
   contents: write   # スナップショットのcommit/pushに必要（既定のGITHUB_TOKENは読み取りのみ）

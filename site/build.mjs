@@ -63,6 +63,21 @@ for (const a of LOCALS) a.winner_name = normDisp(a.winner_name);
 for (const a of LOCALS) if (a.method && a.method.startsWith('事後審査）')) a.method = `一般競争（事後審査・${a.method.slice(5)}）`;
 const byCorpLocal = new Map();
 for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? byCorpLocal.set(a.corporate_no, []).get(a.corporate_no)).push(a);
+
+// ---------- 検索に出すページの絞り込み（2026-10-24・オーナー承認） ----------
+// 2026-09のGoogleのサイト単位の評価低下（docs/postmortem-2026-09-25.md）への対応。
+// URLは全部そのまま残す（利用者からは何も消えない）。sitemapとmeta robotsだけを絞り、
+// 「価値の薄いページを大量に出している」という状態を解く。再開するときは SLIM = false。
+const SLIM = true;
+const COMPANY_AWARDS = new Map(); // 法人番号 → 国＋自治体の落札件数
+for (const a of AWARDS) if (a.corporate_no) COMPANY_AWARDS.set(a.corporate_no, (COMPANY_AWARDS.get(a.corporate_no) || 0) + 1);
+for (const a of LOCALS) if (a.corporate_no) COMPANY_AWARDS.set(a.corporate_no, (COMPANY_AWARDS.get(a.corporate_no) || 0) + 1);
+const COMPANY_MIN_AWARDS = 10;          // 企業ページは落札10件以上だけ検索に出す
+const slimCompany = (no) => SLIM && (COMPANY_AWARDS.get(no) || 0) < COMPANY_MIN_AWARDS;
+const slimNationalContract = () => SLIM; // 国の契約ページは一旦すべて外す
+// 自治体の契約は「予定価格か応札社数を持つ」ものだけ残す（他サイトにない数字があるページ）
+const slimLocalContract = (arr) => SLIM && !arr.some((a) => a.planned_price > 0 || a.bidders > 0);
+const SLIM_COUNT = { company: 0, contractNational: 0, contractLocal: 0 };
 const PREF_SLUGS = {
   '北海道': 'hokkaido', '青森県': 'aomori', '岩手県': 'iwate', '宮城県': 'miyagi', '秋田県': 'akita',
   '山形県': 'yamagata', '福島県': 'fukushima', '茨城県': 'ibaraki', '栃木県': 'tochigi', '群馬県': 'gunma',
@@ -1004,7 +1019,9 @@ ${famTopW && famWinners.size > 1 ? `<p>同種${famRows.length + 1}本を落札�
         : switches === 1 ? '過去に1回落札者が交代しています。固定化しきってはいません。'
         : `これまで落札者の交代は確認できていません。参入のハードルは高めとみられます${slug && LABEL[slug] && TURNOVER[slug] && TURNOVER[slug].rate != null ? `が、${LABEL[slug]}分野全体では${TURNOVER[slug].rate}%の入札で落札者が交代しています` : ''}。`],
   ];
+  const slimN = slimNationalContract(); if (slimN) SLIM_COUNT.contractNational++;
   page(`/contract/${id}/`, {
+    noindex: slimN,
     title: `${name}の落札結果・落札履歴【${mname}・${years}年分】｜${SITE}`,
     desc: `「${name}」（${mname}）の落札結果を${years}年分収録。直近は${last.award_date}に${last.winner_name}が${yen(last.amount)}で落札。歴代の落札者・金額の推移、次回公告の目安、同分野の相場との比較をデータで公開。`,
     crumb: [['継続契約', '/contract/'], [mname, `/contract/${ministry.toLowerCase()}/`], [name, '']],
@@ -1441,7 +1458,9 @@ ${(() => { const mx = amtsC[amtsC.length - 1], md = amtsC[Math.floor(amtsC.lengt
 <p>${esc(name)}が落札した案件の入札方式は、${topM.map(([l, n]) => `${esc(l)}（${n.toLocaleString()}件・${Math.round(n / list.length * 100)}%）`).join('、')}${mCount.size > 3 ? `ほか${mCount.size - 3}方式` : ''}です。${mCount.size === 1 ? '単一の方式に集中しており、戦う土俵がはっきりしている事業者です。' : topM[0][1] / list.length >= 0.7 ? `${esc(topM[0][0])}が大半を占めます。この方式で競合する前提で相手を見ることになります。` : '複数の方式にまたがって受注しており、価格勝負と提案勝負の両方に対応している事業者です。'}</p>
 ${GUIDE_HOSHIKI}` : '';
 
+  const slimC = slimCompany(corpNo); if (slimC) SLIM_COUNT.company++;
   page(`/company/${corpNo}/`, {
+    noindex: slimC,
     title: `${name}の入札結果・落札実績【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
     desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${corpNo}）。${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
@@ -1645,6 +1664,7 @@ page('/alert/thanks/', {
 // 落札=過去の実績、公告=いま出ている案件。両方を1ページに統合する。
 let localCityCount = 0, localPrefCount = 0;
 const cityPagesByPref = new Map(); // 県slug → Set(市区町村名)。生成された市区町村ページの実在集合
+const localPrefPages = new Set(); // 生成された県ページ（/local/<slug>/）の実在集合
 const localByPref = new Map();
 for (const a of LOCALS) (localByPref.get(a.pref) ?? localByPref.set(a.pref, []).get(a.pref)).push(a);
 
@@ -1747,6 +1767,7 @@ ${yr.length >= 3 ? `<p>年別の件数は${yr.map(([y, n]) => `${y}年${n.toLoca
     ? `${prefName}と県内市町村の入札結果（落札者・落札金額）を${ymLabel(plist[0]?.open_date)}分まで${plist.length.toLocaleString()}件横断収録、毎日更新。直近の公告${nlist.length}件、機関別の落札件数、落札企業、直近の落札案件を公開。`
     : `${prefName}で直近35日間に公告された入札案件${nlist.length.toLocaleString()}件を毎日更新で掲載。発注機関・案件名・区分・公告原文へのリンクをまとめています。`;
 
+  localPrefPages.add(pslug);
   page(`/local/${pslug}/`, {
     title, desc,
     crumb: [['自治体の入札結果', '/local/'], [prefName, '']],
@@ -2131,7 +2152,7 @@ ${statBoxes([['直近1年の公告', all.length.toLocaleString() + '件'], ...(l
 </ul>
 <h2>2. ${prefName}の電子入札と案件の探し方</h2>
 <p>${sys ? `${prefName}域の入札情報は<a href="${sys[1]}" rel="noopener">${sys[0]}</a>で公開されており、当サイトはここから毎日データを取得・構造化しています。` : `${prefName}の各自治体の電子入札システム・入札情報サービスは自治体の公式サイトから案内されています。`}
-案件の横断検索は当サイトの<a href="/local/${pslug}/">${prefName}の入札情報</a>（毎日更新）が便利です。
+${localPrefPages.has(pslug) ? `案件の横断検索は当サイトの<a href="/local/${pslug}/">${prefName}の入札情報</a>が便利です。` : ''}
 公告は掲載期間が終わると公式サイトで見られなくなりますが、当サイトは履歴として保持しています。</p>
 <h2>3. ${prefName}の入札市場データ（直近1年）</h2>
 ${topOrgs.length ? `<div class="wrap"><table><tr><th>公告の多い機関</th><th>件数</th></tr>
@@ -2259,7 +2280,7 @@ ${cur.length ? `<h2>募集中の案件</h2>${noticeTable(cur, { withCity: true }
 ${hist.length >= 3 ? `<h2>過去の公募・プロポーザル（履歴）</h2>
 <p>例年どの機関が・いつ頃プロポーザルを出しているかは、次年度の先回り準備に使えます。${topOrgs.length ? `件数が多いのは${topOrgs.map(([o, n]) => `${esc(o)}（${n}件）`).join('、')}。` : ''}</p>
 ${histTable(hist)}` : ''}
-<p><a href="/local/${pslug}/">→ ${prefName}の入札情報全体を見る</a> ／ <a href="/proposal/">→ 他の都道府県の公募・プロポーザル</a></p>`,
+<p>${localPrefPages.has(pslug) ? `<a href="/local/${pslug}/">→ ${prefName}の入札情報全体を見る</a> ／ ` : ''}<a href="/proposal/">→ 他の都道府県の公募・プロポーザル</a></p>`,
     });
   }
   page('/proposal/', {
@@ -2562,7 +2583,9 @@ ${(() => { const ws = new Map(); for (const x of lfamRows) { const w = x.m.last.
     let title = `${c.name}の落札結果・落札履歴【${c.org}・${c.years}年分】｜${SITE}`;
     if (usedTitles.has(title)) title = `${c.name}の落札結果・落札履歴【${c.org}・${c.years}年分・${id.slice(0, 4)}】｜${SITE}`;
     usedTitles.add(title);
+    const slimLC = slimLocalContract(arr); if (slimLC) SLIM_COUNT.contractLocal++;
     page(`/contract/local/${id}/`, {
+      noindex: slimLC,
       title,
       desc: `「${c.name}」（${c.org}）の落札結果を${c.years}年分収録。直近は${last.open_date}に${last.winner_name || '—'}が落札。歴代の落札者・金額の推移と例年の時期を、自治体の公表データから構造化して公開。`,
       crumb: [['継続契約データベース', '/contract/'], ['自治体の継続契約', '/contract/local/'], [c.org, pslug ? `/contract/local/${pslug}/` : '/contract/local/'], [c.name.slice(0, 22), '']],
@@ -2766,7 +2789,9 @@ ${bench2.years && bench2.years.length >= 3 ? `<p>年別の落札件数は${bench
       ...(myRate != null ? [[`${name}の落札率はどのくらいですか?`,
         `予定価格が公表された${myRates.length}件の平均落札率は${myRate}%です${bench2.rate ? `（同じ地域・分野の平均は${bench2.rate}%）` : ''}。落札率は予定価格に対する落札額の割合です。`]] : []),
     ];
+    const slimC2 = slimCompany(no); if (slimC2) SLIM_COUNT.company++;
     page(`/company/${no}/`, {
+      noindex: slimC2,
       title,
       desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${no}）。${topOrg ? `${topOrg[0]}を中心に` : ''}${topCat ? `「${LABEL[topCat[0]]}」分野で` : ''}${years.length ? `${years[0]}〜${years[years.length - 1]}年に` : ''}落札実績があります。落札金額・発注機関をデータで公開。`,
       crumb: [['落札企業', '/company/'], [name, '']],
@@ -3245,5 +3270,7 @@ shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
 writeFileSync(join(DIST, 'sitemap.xml'),
   `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shards.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
 
+if (SLIM) console.log(`
+検索に出さないページ（URLは残す）: 企業${SLIM_COUNT.company.toLocaleString()} / 国の契約${SLIM_COUNT.contractNational.toLocaleString()} / 自治体の契約${SLIM_COUNT.contractLocal.toLocaleString()} ＝ 合計${(SLIM_COUNT.company + SLIM_COUNT.contractNational + SLIM_COUNT.contractLocal).toLocaleString()}`);
 lapLog('全ページ生成完了');
 console.log(`生成完了: 計${urls.length}ページ（相場${priceCount}+地域相場${regionPriceCount}+満了レーダー${radarCount}+契約${contractCount}+地域${localPrefCount}県/${localCityCount}市区町村 / 企業${companyCount} / 機関${organCount}）→ site/dist`);

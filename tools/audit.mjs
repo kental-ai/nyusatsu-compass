@@ -1,10 +1,9 @@
 // 週次セルフ監査: 本番サイト・sitemap整合・データソース生存を機械チェック。
 // 失敗時はexit 1（GitHub Actionsの失敗通知がそのままアラートになる）。
 const ORIGIN = 'https://nyusatsu-compass.com';
-// 2026-10-07: 日次ルーティン（daily-local-awards / daily-rebuild）を停止中のため、
-// 「鮮度」系のチェックは当然のように失敗する。見張りとしての価値がないので飛ばす。
-// 日次を再開したら false に戻す（docs/postmortem-2026-09-25.md・handoff-2026-09-12.md）。
-const DAILY_PAUSED = true;
+// 2026-10-24: 週次ルーティン（weekly-local-awards / weekly-rebuild・月曜）を再開したので鮮度チェックも復活。
+// 止めるときは true に戻す。週次運用なので週報の鮮度しきい値は21日のままで足りる。
+const DAILY_PAUSED = false;
 let failures = 0;
 const skip = (label, why) => console.log(`SKIP ${label} — ${why}`);
 const check = async (label, fn) => {
