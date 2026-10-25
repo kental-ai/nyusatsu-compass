@@ -51,3 +51,31 @@
 - 日次ルーティンを**週次**に変更（オーナー指示）。`weekly-local-awards`（月曜7:00 JST・自治体データ取得）→
   `weekly-rebuild`（月曜8:00 JST・Netlifyビルド）→ `weekly-audit`（月曜10:00 JST・監査）の順で月曜に回る
 - 監査の鮮度チェックは `DAILY_PAUSED` で飛ばしていたが、週次で更新が戻るため有効に戻す
+
+## 修正（2026-10-25）: 絞り込みはGoogleにだけ効かせる
+
+初版は `<meta name="robots" content="noindex">` だったため、**Bingにも効いてしまう**作りだった。
+同じ時期にBingは伸びており（平日 表示3,377・クリック95、10/21は4,490表示・147クリック。Googleのピーク2,827表示を超えた）、
+唯一生きている入口を自分で削るところだった。次のように直した。
+
+- ページ: 通常の robots は `index,follow` のまま、`<meta name="googlebot" content="noindex">` だけを付ける
+- サイトマップ: `sitemap.xml` はGoogle向けに絞った 9,839件、`sitemap-bing.xml` はBing向けに全 71,387件
+- robots.txt が案内するのは `sitemap.xml` のみ。`sitemap-bing.xml` は Bing Webmaster Tools に手で登録する（オーナー作業）
+
+### Bingのページ別レポート（10/25時点・221ページ）
+
+| セクション | クリック | 表示 |
+|---|---|---|
+| local/県 | 797 | 50,503 |
+| local/市区町村 | 167 | 5,613 |
+| organ | 114 | 1,994 |
+| guide | 37 | 3,210 |
+| proposal | 30 | 708 |
+| company | 25 | 217 |
+| contract/国・自治体 | 20 | 128 |
+| 合計 | 1,191 | 62,438 |
+
+**Bingの主力は県ページ（公告の一覧）**。絞り込みで実際に落ちるのは contract と company の計23クリック（全体の1.9%）で、
+しかもGoogle限定にしたのでBingには影響しない。
+注意: 県ページは公告データで作られるため、週次更新だと最大7日古い公告を見せる。Bingの主力がここである以上、
+取得頻度の見直し（公告だけ日次に戻す等）は次の検討事項。

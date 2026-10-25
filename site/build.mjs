@@ -66,8 +66,10 @@ for (const a of LOCALS) if (a.corporate_no) (byCorpLocal.get(a.corporate_no) ?? 
 
 // ---------- 検索に出すページの絞り込み（2026-10-24・オーナー承認） ----------
 // 2026-09のGoogleのサイト単位の評価低下（docs/postmortem-2026-09-25.md）への対応。
-// URLは全部そのまま残す（利用者からは何も消えない）。sitemapとmeta robotsだけを絞り、
-// 「価値の薄いページを大量に出している」という状態を解く。再開するときは SLIM = false。
+// URLは全部そのまま残す（利用者からは何も消えない）。
+// 2026-10-25: 絞り込みは**Googleにだけ**効かせる（meta googlebot=noindex ＋ sitemap.xml を絞る）。
+// Bingは評価を下げておらず平日3,000表示・95クリックまで伸びているので、全ページを出し続ける（sitemap-bing.xml）。
+// 再開するときは SLIM = false。
 const SLIM = true;
 const COMPANY_AWARDS = new Map(); // 法人番号 → 国＋自治体の落札件数
 for (const a of AWARDS) if (a.corporate_no) COMPANY_AWARDS.set(a.corporate_no, (COMPANY_AWARDS.get(a.corporate_no) || 0) + 1);
@@ -468,7 +470,7 @@ const kunSays = (html, expr = 'idea') => html
   ? `<div class="kun-row">${kun(46, expr)}<div class="kun-bubble">${html}</div></div>` : '';
 
 const MADE_DIRS = new Set();
-function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = null, lastmod = null }) {
+function page(path, { title, desc, crumb = [], body, noindex = false, slimOnly = false, jsonld = null, lastmod = null }) {
   const canonical = ORIGIN + encodeURI(path); // 日本語パス(市町村名)は%エンコード、英数字/は不変
   const crumbHtml = crumb.length
     ? `<nav class="crumb">${[['トップ', '/'], ...crumb].map(([t, h], i, arr) =>
@@ -487,7 +489,7 @@ function page(path, { title, desc, crumb = [], body, noindex = false, jsonld = n
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
-<link rel="canonical" href="${canonical}">${noindex ? '\n<meta name="robots" content="noindex">' : '\n<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">'}
+<link rel="canonical" href="${canonical}">${noindex ? '\n<meta name="robots" content="noindex">' : '\n<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">'}${!noindex && slimOnly ? '\n<meta name="googlebot" content="noindex">' : ''}
 <meta property="og:site_name" content="${SITE}">
 <meta property="og:type" content="${path === '/' ? 'website' : 'article'}">
 <meta property="og:title" content="${esc(title)}">
@@ -527,7 +529,8 @@ ${cta()}</div></div>`}
   const dir = dirname(file);
   if (!MADE_DIRS.has(dir)) { mkdirSync(dir, { recursive: true }); MADE_DIRS.add(dir); }
   writeFileSync(file, html);
-  if (!noindex) urls.push({ loc: canonical, lastmod }); // noindexページはsitemapに載せない。lastmodは実データの動いた日
+  // sitemap.xml = Google向けに絞った集合。sitemap-bing-*.xml = Bing向けの全集合（Bingは評価を下げていないので全部出す）
+  if (!noindex) { if (!slimOnly) urls.push({ loc: canonical, lastmod }); urlsAll.push({ loc: canonical, lastmod }); }
   return canonical;
 }
 
@@ -700,7 +703,8 @@ const LOCK = join(ROOT, 'site', '.build.lock');
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
 if (existsSync(join(ROOT, 'site', 'static'))) cpSync(join(ROOT, 'site', 'static'), join(DIST, 'assets'), { recursive: true });
-const urls = [];
+const urls = [];    // Google向け（絞り込み後）
+const urlsAll = []; // Bing向け（全ページ）
 
 // 相場ページ（類似案件検索ツール + 洞察 + 金額帯 + 発注カレンダー）
 let priceCount = 0;
@@ -1021,7 +1025,7 @@ ${famTopW && famWinners.size > 1 ? `<p>同種${famRows.length + 1}本を落札�
   ];
   const slimN = slimNationalContract(); if (slimN) SLIM_COUNT.contractNational++;
   page(`/contract/${id}/`, {
-    noindex: slimN,
+    slimOnly: slimN,
     title: `${name}の落札結果・落札履歴【${mname}・${years}年分】｜${SITE}`,
     desc: `「${name}」（${mname}）の落札結果を${years}年分収録。直近は${last.award_date}に${last.winner_name}が${yen(last.amount)}で落札。歴代の落札者・金額の推移、次回公告の目安、同分野の相場との比較をデータで公開。`,
     crumb: [['継続契約', '/contract/'], [mname, `/contract/${ministry.toLowerCase()}/`], [name, '']],
@@ -1460,7 +1464,7 @@ ${GUIDE_HOSHIKI}` : '';
 
   const slimC = slimCompany(corpNo); if (slimC) SLIM_COUNT.company++;
   page(`/company/${corpNo}/`, {
-    noindex: slimC,
+    slimOnly: slimC,
     title: `${name}の入札結果・落札実績【官公庁${list.length.toLocaleString()}件】${dupName ? `（法人番号${corpNo}）` : ''}｜${SITE}`,
     desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${corpNo}）。${summary}継続契約の落札履歴と次回公告の目安、同分野の落札企業をデータで公開。`,
     crumb: [['落札企業', '/company/'], [name, '']],
@@ -2585,7 +2589,7 @@ ${(() => { const ws = new Map(); for (const x of lfamRows) { const w = x.m.last.
     usedTitles.add(title);
     const slimLC = slimLocalContract(arr); if (slimLC) SLIM_COUNT.contractLocal++;
     page(`/contract/local/${id}/`, {
-      noindex: slimLC,
+      slimOnly: slimLC,
       title,
       desc: `「${c.name}」（${c.org}）の落札結果を${c.years}年分収録。直近は${last.open_date}に${last.winner_name || '—'}が落札。歴代の落札者・金額の推移と例年の時期を、自治体の公表データから構造化して公開。`,
       crumb: [['継続契約データベース', '/contract/'], ['自治体の継続契約', '/contract/local/'], [c.org, pslug ? `/contract/local/${pslug}/` : '/contract/local/'], [c.name.slice(0, 22), '']],
@@ -2791,7 +2795,7 @@ ${bench2.years && bench2.years.length >= 3 ? `<p>年別の落札件数は${bench
     ];
     const slimC2 = slimCompany(no); if (slimC2) SLIM_COUNT.company++;
     page(`/company/${no}/`, {
-      noindex: slimC2,
+      slimOnly: slimC2,
       title,
       desc: `${name}の入札結果・落札実績${list.length.toLocaleString()}件（法人番号${no}）。${topOrg ? `${topOrg[0]}を中心に` : ''}${topCat ? `「${LABEL[topCat[0]]}」分野で` : ''}${years.length ? `${years[0]}〜${years[years.length - 1]}年に` : ''}落札実績があります。落札金額・発注機関をデータで公開。`,
       crumb: [['落札企業', '/company/'], [name, '']],
@@ -3265,6 +3269,13 @@ ${TAXONOMY.filter((t) => (byCat.get(t.slug) || []).length >= MIN_PRICE_AWARDS).s
 `);
 const shards = [];
 for (let i = 0; i < urls.length; i += 10000) shards.push(urls.slice(i, i + 10000));
+const shardsAll = [];
+for (let i = 0; i < urlsAll.length; i += 10000) shardsAll.push(urlsAll.slice(i, i + 10000));
+shardsAll.forEach((s, i) => writeFileSync(join(DIST, `sitemap-bing-${i}.xml`),
+  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${s.map((u) => `<url><loc>${u.loc}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>`));
+writeFileSync(join(DIST, 'sitemap-bing.xml'),
+  `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${shardsAll.map((_, i) => `<sitemap><loc>${ORIGIN}/sitemap-bing-${i}.xml</loc></sitemap>`).join('\n')}\n</sitemapindex>`);
+console.log(`サイトマップ: Google向け ${urls.length.toLocaleString()} / Bing向け ${urlsAll.length.toLocaleString()}`);
 shards.forEach((s, i) => writeFileSync(join(DIST, `sitemap-${i}.xml`),
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${s.map((u) => `<url><loc>${u.loc}</loc>${u.lastmod ? `<lastmod>${u.lastmod}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>`));
 writeFileSync(join(DIST, 'sitemap.xml'),
