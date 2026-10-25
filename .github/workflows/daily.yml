@@ -1,9 +1,12 @@
-# 毎週月曜の再ビルドトリガー。実ビルドはNetlify側（netlify.toml参照）。
+# 毎日の再ビルドトリガー。実ビルドはNetlify側（netlify.toml参照）。
+# このビルドの中で公告（fetch_kkj 35日分）と国の落札差分（fetch_geps recent）を取得している。
+# Bingの流入の67%は県ごとの公告一覧ページなので、公告の鮮度を保つためビルドは日次に戻した（2026-10-25）。
+# 重い自治体の落札結果の取得（weekly-local-awards・約1時間40分）は週次のまま。
 # 事前準備: NetlifyのBuild hooks URLをリポジトリsecretsに NETLIFY_BUILD_HOOK として登録する。
-name: weekly-rebuild
+name: daily-rebuild
 on:
   schedule:
-    - cron: '0 23 * * 0'   # 日曜23:00 UTC = 月曜8:00 JST（2026-10-24に日次から週次へ。7:00の自治体スナップショット更新の後）
+    - cron: '0 23 * * *'   # 23:00 UTC = 毎日8:00 JST（月曜は7:00の自治体スナップショット更新の後になる）
   workflow_dispatch:
 jobs:
   trigger:
